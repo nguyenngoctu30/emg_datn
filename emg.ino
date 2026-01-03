@@ -8,19 +8,16 @@
 #include <math.h>
 #include <HTTPUpdate.h>
 #include <FastLED.h>
+#include <WiFiClientSecure.h>
 
-// ============================================================================
-// PIN & LED CONFIGURATION
-// ============================================================================
+
 #define SensorInputPin1 0
 #define SensorInputPin2 1
 #define LED_PIN 8
 #define NUM_LEDS 1
 CRGB leds[NUM_LEDS];
 
-// ============================================================================
-// EMG FILTER CONFIGURATION
-// ============================================================================
+
 EMGFilters myFilter1;
 EMGFilters myFilter2;
 SAMPLE_FREQUENCY sampleRate = SAMPLE_FREQ_1000HZ;
@@ -47,6 +44,32 @@ bool isRotating = false;
 unsigned long rotationStartTime = 0;
 const int ROTATION_TIME = 500;
 
+// Debouncing for grip/release detection
+unsigned long lastStateChange = 0;
+const unsigned long MIN_STATE_CHANGE_INTERVAL = 500; // Minimum 500ms between state changes (increased for stability)
+bool lastGripState = false; // false = relaxed, true = gripped
+
+// Confirmation mechanism: require signal to stay above/below threshold for a duration
+unsigned long gripConfirmationStart = 0;
+unsigned long relaxConfirmationStart = 0;
+const unsigned long CONFIRMATION_DURATION = 200; // Require 200ms of consistent signal before changing state
+bool confirmedGripState = false; // The confirmed/stable state
+// ============================================================================
+// ENHANCED SIGNAL PROCESSING - EMA FILTER
+// ============================================================================
+#define EMA_ARRAY_SIZE 15
+int emaArray1[EMA_ARRAY_SIZE];
+int emaArray2[EMA_ARRAY_SIZE];
+int emaIndex1 = 0;
+int emaIndex2 = 0;
+bool emaFull1 = false;
+bool emaFull2 = false;
+float emaValue1 = 0.0;
+float emaValue2 = 0.0;
+const float EMA_ALPHA = 0.35;
+
+int emg1_stable = 0;
+int emg2_stable = 0;
 // ============================================================================
 // ADAPTIVE THRESHOLDS
 // ============================================================================
@@ -64,8 +87,8 @@ struct TrainingState {
     unsigned long startTime;
     unsigned long lastSample;
     std::vector<int> samples;
-    const unsigned long DURATION_MS = 5000;
-    const unsigned long SAMPLE_INTERVAL_MS = 100;
+    unsigned long DURATION_MS = 30000; // default 30 seconds, made writable by MQTT
+    unsigned long SAMPLE_INTERVAL_MS = 100;
     int progressPercent;
     int gestureType;
 } training;
@@ -93,6 +116,9 @@ const char* topic_threshold_low = "servo/threshold_low";
 const char* topic_threshold_high = "servo/threshold_high";
 const char* topic_cmd = "servo/cmd";
 const char* topic_ema = "servo/ema";
+const int OTA_CONNECT_TIMEOUT = 15000;      // 15s để connect
+const int OTA_CHUNK_TIMEOUT = 45000;        // 45s cho mỗi chunk (tăng từ 30s)
+const int OTA_TOTAL_TIMEOUT = 300000;       // 5 phút tổng (tăng từ 3 phút)
 
 String deviceId = "device01";
 String topic_device_ota = "";
@@ -149,7 +175,17 @@ void setup() {
     setupHardware();
     setupNetwork();
     loadThresholds();
-    
+    // Khởi tạo EMA arrays
+    for (int i = 0; i < EMA_ARRAY_SIZE; i++) {
+        emaArray1[i] = 0;
+        emaArray2[i] = 0;
+    }
+    emaValue1 = 0.0;
+    emaValue2 = 0.0;
+    emaIndex1 = 0;
+    emaIndex2 = 0;
+    emaFull1 = false;
+    emaFull2 = false;
     Serial.println(">>> CALIBRATING: Keep muscles relaxed for 3 seconds...");
 }
 
@@ -397,26 +433,64 @@ void handleCalibration() {
 // SIGNAL PROCESSING
 // ============================================================================
 void processEMGSignals() {
-    // Read ADC
+    // 1. ĐỌC ADC
     int raw1 = analogRead(SensorInputPin1);
     int raw2 = analogRead(SensorInputPin2);
     
-    // Remove baseline (DC offset)
+    // 2. LOẠI BỎ BASELINE (DC OFFSET)
     int normalized1 = max(0, raw1 - baseline1);
     int normalized2 = max(0, raw2 - baseline2);
     
-    // Apply EMGFilters (50Hz notch + envelope detection)
-    emg1_filtered = max(0, myFilter1.update(normalized1));
-    emg2_filtered = max(0, myFilter2.update(normalized2));
+    // 3. LỌC QUA EMGFilters (50Hz notch + envelope)
+    int filtered1 = max(0, myFilter1.update(normalized1));
+    int filtered2 = max(0, myFilter2.update(normalized2));
     
-    // Debug output (throttled to 10Hz)
+    // 4. MOVING AVERAGE - Lớp lọc thứ nhất
+    emaArray1[emaIndex1] = filtered1;
+    emaIndex1 = (emaIndex1 + 1) % EMA_ARRAY_SIZE;
+    if (emaIndex1 == 0) emaFull1 = true;
+    
+    emaArray2[emaIndex2] = filtered2;
+    emaIndex2 = (emaIndex2 + 1) % EMA_ARRAY_SIZE;
+    if (emaIndex2 == 0) emaFull2 = true;
+    
+    // 5. EMA - Lớp lọc thứ hai (chỉ tính sau khi mảng đầy)
+    if (emaFull1) {
+        long sum1 = 0;
+        for (int i = 0; i < EMA_ARRAY_SIZE; i++) {
+            sum1 += emaArray1[i];
+        }
+        int average1 = sum1 / EMA_ARRAY_SIZE;
+        emaValue1 = EMA_ALPHA * average1 + (1.0 - EMA_ALPHA) * emaValue1;
+        emg1_stable = (int)emaValue1;
+    }
+    
+    if (emaFull2) {
+        long sum2 = 0;
+        for (int i = 0; i < EMA_ARRAY_SIZE; i++) {
+            sum2 += emaArray2[i];
+        }
+        int average2 = sum2 / EMA_ARRAY_SIZE;
+        emaValue2 = EMA_ALPHA * average2 + (1.0 - EMA_ALPHA) * emaValue2;
+        emg2_stable = (int)emaValue2;
+    }
+    
+    // 6. CẬP NHẬT GIÁ TRỊ CHO CÁC HÀM KHÁC (backward compatibility)
+    emg1_filtered = emg1_stable;
+    emg2_filtered = emg2_stable;
+    
+    // 7. DEBUG OUTPUT (throttled to 10Hz)
     static unsigned long lastDebug = 0;
     if (millis() - lastDebug >= 100) {
         lastDebug = millis();
-        Serial.print("EMG1: ");
-        Serial.print(emg1_filtered);
-        Serial.print(" | EMG2: ");
-        Serial.print(emg2_filtered);
+        Serial.print("EMG1: raw=");
+        Serial.print(filtered1);
+        Serial.print(" stable=");
+        Serial.print(emg1_stable);
+        Serial.print(" | EMG2: raw=");
+        Serial.print(filtered2);
+        Serial.print(" stable=");
+        Serial.print(emg2_stable);
         Serial.print(" | Angle: ");
         Serial.print(currentAngle);
         Serial.print("° | Thresh: L=");
@@ -425,34 +499,89 @@ void processEMGSignals() {
         Serial.println(thresholdHigh);
     }
 }
-
-// ============================================================================
-// SERVO CONTROL WITH HYSTERESIS
-// ============================================================================
 void controlServo() {
-    // Rotate to 180° if ANY sensor exceeds HIGH threshold
-    if ((emg1_filtered > thresholdHigh || emg2_filtered > thresholdHigh) 
-        && currentAngle == 0 && !isRotating) {
-        
+    // Đảm bảo EMA đã ổn định
+    if (!emaFull1 || !emaFull2) {
+        return;
+    }
+    
+    // Validate thresholds
+    if (thresholdLow <= 0 || thresholdLow < 2) {
+        int minLow = max(2, thresholdHigh / 4);
+        thresholdLow = minLow;
+        Serial.println("  ⚠ WARNING: thresholdLow adjusted to " + String(thresholdLow));
+        saveThresholds();
+    }
+    
+    int minSeparation = max(5, (int)(thresholdLow * 0.3));
+    if (thresholdHigh <= thresholdLow + minSeparation) {
+        thresholdHigh = thresholdLow + minSeparation;
+        Serial.println("  ⚠ WARNING: thresholdHigh adjusted to " + String(thresholdHigh));
+        saveThresholds();
+    }
+    
+    // Debouncing
+    unsigned long now = millis();
+    bool canChangeState = (now - lastStateChange >= MIN_STATE_CHANGE_INTERVAL);
+    
+    // ✅ SỬ DỤNG emg1_stable, emg2_stable (đã qua EMA)
+    bool currentGripSignal = (emg1_stable > thresholdHigh || emg2_stable > thresholdHigh);
+    bool currentRelaxSignal = (emg1_stable < thresholdLow && emg2_stable < thresholdLow);
+    
+    // Confirmation mechanism
+    if (currentGripSignal && !confirmedGripState) {
+        if (gripConfirmationStart == 0) {
+            gripConfirmationStart = now;
+        } else if (now - gripConfirmationStart >= CONFIRMATION_DURATION) {
+            confirmedGripState = true;
+            relaxConfirmationStart = 0;
+        }
+    } else if (!currentGripSignal) {
+        gripConfirmationStart = 0;
+    }
+    
+    if (currentRelaxSignal && confirmedGripState) {
+        if (relaxConfirmationStart == 0) {
+            relaxConfirmationStart = now;
+        } else if (now - relaxConfirmationStart >= CONFIRMATION_DURATION) {
+            confirmedGripState = false;
+            gripConfirmationStart = 0;
+        }
+    } else if (!currentRelaxSignal) {
+        relaxConfirmationStart = 0;
+    }
+    
+    // Rotate to 180° if grip is confirmed
+    if (confirmedGripState && currentAngle == 0 && !isRotating && canChangeState) {
         isRotating = true;
         rotationStartTime = millis();
         currentAngle = 180;
+        lastStateChange = now;
+        lastGripState = true;
         
         Serial.println("\n>>> SERVO: 0° → 180° (FLEX DETECTED)");
+        Serial.print("  EMG1: "); Serial.print(emg1_stable);
+        Serial.print(" | EMG2: "); Serial.print(emg2_stable);
+        Serial.print(" | Thresh: L="); Serial.print(thresholdLow);
+        Serial.print(" H="); Serial.println(thresholdHigh);
         
         if (mqttClient.connected()) {
             mqttClient.publish(topic_angle, "180");
         }
     }
-    // Return to 0° if BOTH sensors below LOW threshold
-    else if ((emg1_filtered < thresholdLow && emg2_filtered < thresholdLow)
-             && currentAngle == 180 && !isRotating) {
-        
+    // Return to 0° if relax is confirmed
+    else if (!confirmedGripState && currentAngle == 180 && !isRotating && canChangeState) {
         isRotating = true;
         rotationStartTime = millis();
         currentAngle = 0;
+        lastStateChange = now;
+        lastGripState = false;
         
         Serial.println("\n>>> SERVO: 180° → 0° (RELAXED)");
+        Serial.print("  EMG1: "); Serial.print(emg1_stable);
+        Serial.print(" | EMG2: "); Serial.print(emg2_stable);
+        Serial.print(" | Thresh: L="); Serial.print(thresholdLow);
+        Serial.print(" H="); Serial.println(thresholdHigh);
         
         if (mqttClient.connected()) {
             mqttClient.publish(topic_angle, "0");
@@ -465,22 +594,25 @@ void controlServo() {
     }
 }
 
-// ============================================================================
-// TRAINING DATA COLLECTION - SYNCED WITH WEB (5 SECONDS)
-// ============================================================================
 void handleTraining() {
     if (!training.active) return;
     
     unsigned long now = millis();
     unsigned long elapsed = now - training.startTime;
     
+    // QUAN TRỌNG: Chỉ thu thập khi EMA đã ổn định
+    if (!emaFull1 || !emaFull2) {
+        Serial.println("[TRAIN] Waiting for EMA to stabilize...");
+        return;
+    }
+    
     // Sample collection
     if (now - training.lastSample >= training.SAMPLE_INTERVAL_MS) {
         training.lastSample = now;
         
-        // Collect both sensor values
-        training.samples.push_back(emg1_filtered);
-        training.samples.push_back(emg2_filtered);
+        // ✅ Thu thập dữ liệu ĐÃ QUA EMA (emg1_stable, emg2_stable)
+        training.samples.push_back(emg1_stable);
+        training.samples.push_back(emg2_stable);
         
         // Update progress
         training.progressPercent = (elapsed * 100) / training.DURATION_MS;
@@ -492,20 +624,25 @@ void handleTraining() {
             Serial.print(training.samples.size());
             Serial.print(" | Progress: ");
             Serial.print(training.progressPercent);
-            Serial.println("%");
+            Serial.print("% | Current: S1=");
+            Serial.print(emg1_stable);
+            Serial.print(" S2=");
+            Serial.println(emg2_stable);
             
-            // ✅ Gửi progress cho web
+            // Gửi progress cho web
             if (mqttClient.connected()) {
                 String msg = "{\"status\":\"training_progress\",\"gesture\":" + 
                             String(training.gestureType) +
                             ",\"progress\":" + String(training.progressPercent) + 
-                            ",\"samples\":" + String(training.samples.size()) + "}";
+                            ",\"samples\":" + String(training.samples.size()) + 
+                            ",\"current_s1\":" + String(emg1_stable) +
+                            ",\"current_s2\":" + String(emg2_stable) + "}";
                 mqttClient.publish(topic_train, msg.c_str());
             }
         }
     }
     
-    // ✅ Check if 5 seconds elapsed
+    // Check if duration elapsed
     if (elapsed >= training.DURATION_MS) {
         training.active = false;
         
@@ -524,17 +661,18 @@ void handleTraining() {
             return;
         }
         
-        // ✅ Gửi collection_done cho web
+        // Gửi collection_done cho web
         String response = "{\"status\":\"collection_done\",\"gesture\":" + 
-                         String(training.gestureType) + 
-                         ",\"samples\":" + String(training.samples.size()) + "}";
+                 String(training.gestureType) + 
+                 ",\"samples\":" + String(training.samples.size()) + "}";
         mqttClient.publish(topic_train, response.c_str());
-        
+
         Serial.println("  ✓ Data collection complete");
-        Serial.println("  Click 'Huấn luyện Mô hình' on web to train\n");
+        Serial.println("  → Running K-Means clustering...");
         
-        // NOTE: Don't run K-Means automatically
-        // Wait for web to send { "action": "train" }
+        computeThresholdsKMeans();
+        
+        Serial.println("  ✓ K-Means training finished\n");
     }
 }
 
@@ -725,15 +863,51 @@ void computeThresholdsKMeans() {
         Serial.println("  Quality: FAIR → 10% reduction");
     }
     
+    // Calculate thresholds with validation
     thresholdLow = (int)round(bestCentroids[0]);
     thresholdHigh = (int)round(bestCentroids[1] * highReduction);
     
-    // Ensure minimum separation
+    // CRITICAL: Ensure thresholdLow is NEVER 0 or too low
+    // Minimum thresholdLow must be at least 2 to properly detect relaxed state
+    // If centroid 0 is too low, use a percentage of centroid 1 instead
+    if (thresholdLow <= 0 || thresholdLow < 2) {
+        // Use 25% of high threshold as low threshold, minimum 2
+        thresholdLow = max(2, (int)round(bestCentroids[1] * 0.25));
+        Serial.print("  ⚠ thresholdLow was too low, adjusted to: ");
+        Serial.println(thresholdLow);
+    }
+    
+    // Ensure minimum separation between thresholds (at least 30% of low threshold, minimum 5)
     int minSeparation = max(5, (int)(thresholdLow * 0.3));
     if (thresholdHigh <= thresholdLow + minSeparation) {
         thresholdHigh = thresholdLow + minSeparation;
         Serial.print("  ⚠ Applied minimum separation: +");
         Serial.println(minSeparation);
+    }
+    
+    // Final validation: ensure thresholds are reasonable and properly ordered
+    if (thresholdLow >= thresholdHigh || thresholdLow <= 0) {
+        // Fallback: use safe defaults with proper separation
+        // Ensure low is at least 2, high is at least low + 5
+        thresholdLow = max(2, (int)round(bestCentroids[0]));
+        if (thresholdLow < 2) thresholdLow = 2; // Force minimum
+        
+        int calculatedHigh = thresholdLow + max(8, (int)round(separation * 0.5));
+        if (calculatedHigh <= thresholdLow) {
+            calculatedHigh = thresholdLow + 8; // Force minimum separation
+        }
+        thresholdHigh = calculatedHigh;
+        
+        Serial.println("  ⚠ WARNING: Thresholds were invalid, using safe fallback values");
+        Serial.print("    Fallback LOW: "); Serial.println(thresholdLow);
+        Serial.print("    Fallback HIGH: "); Serial.println(thresholdHigh);
+    }
+    
+    // Final safety check: ensure thresholdLow is definitely > 0
+    if (thresholdLow <= 0) {
+        thresholdLow = 2; // Absolute minimum
+        thresholdHigh = max(thresholdHigh, thresholdLow + 5);
+        Serial.println("  ⚠ CRITICAL: Forced thresholdLow to 2 (absolute minimum)");
     }
     
     // Save to NVS
@@ -768,28 +942,19 @@ void computeThresholdsKMeans() {
     delete[] labels;
 }
 
-// ============================================================================
-// TELEMETRY PUBLISHING - ENHANCED WITH EMA + FIRMWARE
-// ============================================================================
 void publishTelemetry() {
     unsigned long now = millis();
     
-    // Publish basic EMG values every 1s
-    if (now - lastMqttPublish >= MQTT_PUBLISH_INTERVAL) {
-        if (!mqttClient.connected()) return;
-        lastMqttPublish = now;
-        
-        mqttClient.publish(topic_emg1, String(emg1_filtered).c_str());
-        mqttClient.publish(topic_emg2, String(emg2_filtered).c_str());
-    }
-    
-    // ✅ Publish EMA + Firmware to servo/ema every 1s (web expects this!)
+    // Publish EMA + Firmware every 1s
     if (now - lastEmaPublish >= EMA_PUBLISH_INTERVAL) {
         if (!mqttClient.connected()) return;
         lastEmaPublish = now;
         
-        String emaPayload = "{\"s1\":" + String(emg1_filtered) + 
-                           ",\"s2\":" + String(emg2_filtered) +
+        // ✅ Gửi cả raw và stable values
+        String emaPayload = "{\"s1_raw\":" + String(emg1_filtered) + 
+                           ",\"s2_raw\":" + String(emg2_filtered) +
+                           ",\"s1_stable\":" + String(emg1_stable) +
+                           ",\"s2_stable\":" + String(emg2_stable) +
                            ",\"firmware\":\"" + firmwareVersion + "\"}";
         
         mqttClient.publish(topic_ema, emaPayload.c_str());
@@ -801,18 +966,18 @@ void publishTelemetry() {
         if (!mqttClient.connected()) return;
         lastStatusPublish = now;
         
-        String status = "{\"emg1\":" + String(emg1_filtered) +
-                       ",\"emg2\":" + String(emg2_filtered) +
+        String status = "{\"emg1_stable\":" + String(emg1_stable) +
+                       ",\"emg2_stable\":" + String(emg2_stable) +
                        ",\"angle\":" + String(currentAngle) +
                        ",\"thresholds\":{\"low\":" + String(thresholdLow) + 
                        ",\"high\":" + String(thresholdHigh) + "}" +
                        ",\"fw\":\"" + firmwareVersion + "\"" +
+                       ",\"ema_ready\":" + String(emaFull1 && emaFull2) +
                        ",\"uptime\":" + String(millis() / 1000) + "}";
         
         mqttClient.publish(topic_device_status.c_str(), status.c_str());
     }
 }
-
 // ============================================================================
 // MQTT CALLBACK - COMMAND HANDLER
 // ============================================================================
@@ -838,20 +1003,48 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (topicStr == topic_train || topicStr == topic_cmd) {
         if (msg.indexOf("train_threshold") >= 0 || msg.indexOf("start") >= 0) {
             if (!training.active) {
+                // Default durationSeconds
+                int durationSeconds = 5; // default 5s
+
+                // Try to parse duration from JSON payload: look for "duration":<num>
+                int pos = msg.indexOf("duration");
+                if (pos >= 0) {
+                    // Find ':' after duration
+                    int colon = msg.indexOf(':', pos);
+                    if (colon >= 0) {
+                        // extract number characters after colon
+                        String numStr = "";
+                        for (int i = colon + 1; i < msg.length(); i++) {
+                            char c = msg.charAt(i);
+                            if ((c >= '0' && c <= '9') || c == '-') numStr += c;
+                            else if (c == ' ' || c == '\r' || c == '\n' || c == '\t') continue;
+                            else break;
+                        }
+                        if (numStr.length() > 0) durationSeconds = numStr.toInt();
+                    }
+                }
+
+                // Clamp duration to sensible range
+                if (durationSeconds < 1) durationSeconds = 1;
+                if (durationSeconds > 120) durationSeconds = 120;
+
+                training.DURATION_MS = (unsigned long)durationSeconds * 1000UL;
+
                 training.active = true;
                 training.startTime = millis();
                 training.lastSample = 0;
                 training.progressPercent = 0;
                 training.samples.clear();
                 training.samples.reserve(500);
-                
+
                 Serial.println("\n╔═══════════════════════════════════════╗");
                 Serial.println("║   TRAINING STARTED                    ║");
                 Serial.println("╚═══════════════════════════════════════╝");
-                Serial.println("  Duration: 60 seconds");
+                Serial.print("  Duration: "); Serial.print(durationSeconds); Serial.println(" seconds");
                 Serial.println("  Please perform muscle contractions\n");
-                
-                mqttClient.publish(topic_train, "{\"status\":\"started\",\"duration\":60}");
+
+                String startedMsg = "{\"status\":\"started\",\"duration\":" + String(durationSeconds) + "}";
+                mqttClient.publish(topic_train, startedMsg.c_str());
             } else {
                 Serial.println("  ⚠ Training already in progress");
             }
@@ -1041,17 +1234,17 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         mqttClient.publish(topic_ota, errorMsg.c_str());
     }
 }
+// ============================================================================
+// OTA UPDATE - ENHANCED VERSION WITH 5 CRITICAL FIXES
+// ============================================================================
 
-// ============================================================================
-// OTA UPDATE WITH VALIDATION
-// ============================================================================
 void performOtaUpdate(String url) {
     Serial.println("\n╔═══════════════════════════════════════╗");
-    Serial.println("║   OTA UPDATE STARTED                  ║");
+    Serial.println("║   OTA UPDATE - STREAM TIMEOUT FIX     ║");
     Serial.println("╚═══════════════════════════════════════╝");
     Serial.println("  URL: " + url);
     
-    // ========== VALIDATION 1: URL PROTOCOL ==========
+    // Validation
     if (!url.startsWith("https://")) {
         Serial.println("  ✗ ERROR: URL must use HTTPS");
         mqttClient.publish(topic_ota, "{\"status\":\"failed\",\"error\":\"https_required\"}");
@@ -1061,31 +1254,6 @@ void performOtaUpdate(String url) {
         return;
     }
     
-    // ========== VALIDATION 2: URL LENGTH ==========
-    if (url.length() > 250) {
-        Serial.println("  ⚠ WARNING: URL is very long (" + String(url.length()) + " chars)");
-        Serial.println("    This may cause issues with some servers");
-    }
-    
-    // ========== VALIDATION 3: FILE EXTENSION ==========
-    if (!url.endsWith(".bin")) {
-        Serial.println("  ⚠ WARNING: File may not be .bin firmware");
-    }
-    
-    // ========== VALIDATION 4: DROPBOX URL FORMAT ==========
-    if (url.indexOf("dl.dropboxusercontent.com") == -1 && url.indexOf("dropbox.com") == -1) {
-        Serial.println("  ⚠ WARNING: URL is not a Dropbox link");
-    } else {
-        // Check if it's a proper direct download link
-        if (url.indexOf("dl.dropboxusercontent.com") != -1) {
-            Serial.println("  ✓ Dropbox direct download link detected");
-        } else {
-            Serial.println("  ⚠ WARNING: This may be a share link, not direct download");
-            Serial.println("    Consider converting to direct download link");
-        }
-    }
-    
-    // ========== VALIDATION 5: NETWORK CONNECTIVITY ==========
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("  ✗ ERROR: WiFi not connected");
         mqttClient.publish(topic_ota, "{\"status\":\"failed\",\"error\":\"no_wifi\"}");
@@ -1095,282 +1263,375 @@ void performOtaUpdate(String url) {
         return;
     }
     
-    // Status LED: Blue (downloading)
-    setOtaLed(CRGB::Blue);
+    // ========== CRITICAL FIX 1: AGGRESSIVE TIMEOUT SETTINGS ==========
+    Serial.println("\n[FIX 1] Configuring aggressive timeouts...");
     
-    // Publish start status
-    String startMsg = "{\"status\":\"downloading\",\"url\":\"" + url + "\",\"fw_current\":\"" + firmwareVersion + "\"}";
-    mqttClient.publish(topic_ota, startMsg.c_str());
-    
-    // Configure HTTPUpdate
-    // Note: HTTPUpdate handles HTTPS automatically for https:// URLs
-    WiFiClient client;
-    client.setTimeout(OTA_TIMEOUT / 1000);
-    client.setNoDelay(true); // Disable Nagle algorithm for faster response
-    httpUpdate.rebootOnUpdate(false); // Manual reboot for cleanup
-    
-    // Configure HTTPUpdate for better stability
-    // Note: setLedPin may not be available on all ESP32 variants
-    // httpUpdate.setLedPin(LED_PIN, LOW); // Optional: use LED to show progress
-    
-    // Test connection first with a simple HTTP request
-    Serial.println("  Testing connection to server...");
-    HTTPClient http;
-    http.begin(url);
-    http.setTimeout(10000); // 10s timeout for test
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.addHeader("User-Agent", "ESP32-OTA-Update");
-    int httpCode = http.sendRequest("HEAD");
-    
-    if (httpCode > 0) {
-        Serial.print("  ✓ Server responded with HTTP code: ");
-        Serial.println(httpCode);
-        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY || httpCode == HTTP_CODE_FOUND || httpCode == HTTP_CODE_TEMPORARY_REDIRECT) {
-            Serial.println("  ✓ URL is accessible and ready for download");
-        } else {
-            Serial.print("  ⚠ Warning: Unexpected HTTP code: ");
-            Serial.println(httpCode);
-            Serial.println("  Will still attempt OTA update...");
-        }
-    } else {
-        Serial.print("  ⚠ Warning: Connection test failed: ");
-        Serial.println(http.errorToString(httpCode));
-        Serial.println("  Error code: " + String(httpCode));
-        Serial.println("  Will still attempt OTA update...");
-    }
-    http.end();
-    
-    Serial.println("  Starting firmware download...");
-    Serial.print("  Timeout: ");
-    Serial.print(OTA_TIMEOUT / 1000);
-    Serial.println(" seconds");
-    
-    // Check WiFi signal strength
-    int rssi = WiFi.RSSI();
-    Serial.print("  WiFi RSSI: ");
-    Serial.print(rssi);
-    Serial.println(" dBm");
-    
-    if (rssi < -80) {
-        Serial.println("  ⚠ WARNING: Weak WiFi signal, OTA may fail");
-        Serial.println("  💡 Suggestion: Move ESP32 closer to WiFi router");
+    // Disconnect MQTT
+    if (mqttClient.connected()) {
+        String startMsg = "{\"status\":\"starting\",\"url\":\"" + url + "\"}";
+        mqttClient.publish(topic_ota, startMsg.c_str());
+        delay(500);
+        mqttClient.disconnect();
+        delay(1000);
     }
     
-    // Ensure WiFi is stable before starting
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("  ✗ ERROR: WiFi disconnected before OTA");
-        mqttClient.publish(topic_ota, "{\"status\":\"failed\",\"error\":\"wifi_disconnected_before_ota\"}");
-        setOtaLed(CRGB::Red);
-        delay(2000);
-        setOtaLed(CRGB::Black);
+    // Boost WiFi
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
+    delay(100);
+    
+    Serial.println("  ✓ MQTT disconnected");
+    Serial.println("  ✓ WiFi sleep disabled");
+    Serial.println("  ✓ WiFi auto-reconnect enabled");
+    
+    // ========== CRITICAL FIX 2: CUSTOM HTTP CLIENT WITH CHUNK CONTROL ==========
+    Serial.println("\n[FIX 2] Creating optimized HTTP client...");
+    
+    WiFiClientSecure *secureClient = new WiFiClientSecure();
+    if (!secureClient) {
+        Serial.println("  ✗ ERROR: Cannot allocate WiFiClientSecure");
+        WiFi.setSleep(true);
+        reconnectMqtt();
         return;
     }
     
-    unsigned long startTime = millis();
+    // CRITICAL: Set aggressive timeouts
+    secureClient->setInsecure();
+    secureClient->setTimeout(OTA_CHUNK_TIMEOUT / 1000);  // 45s per chunk
+    secureClient->setHandshakeTimeout(OTA_CONNECT_TIMEOUT / 1000); // 15s connect
     
-    // Perform update with retry for connection lost errors
+    Serial.print("  ✓ Chunk timeout: ");
+    Serial.print(OTA_CHUNK_TIMEOUT / 1000);
+    Serial.println("s");
+    Serial.print("  ✓ Connect timeout: ");
+    Serial.print(OTA_CONNECT_TIMEOUT / 1000);
+    Serial.println("s");
+    
+    // ========== CRITICAL FIX 3: PRE-FLIGHT CHECK WITH DETAILED INFO ==========
+    Serial.println("\n[FIX 3] Pre-flight server check...");
+    HTTPClient httpTest;
+    httpTest.begin(*secureClient, url);
+    httpTest.setTimeout(OTA_CONNECT_TIMEOUT);
+    httpTest.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    httpTest.addHeader("User-Agent", "ESP32-OTA/2.0");
+    httpTest.addHeader("Accept", "*/*");
+    
+    unsigned long testStart = millis();
+    int testCode = httpTest.sendRequest("HEAD");
+    unsigned long testDuration = millis() - testStart;
+    
+    Serial.print("  Test duration: ");
+    Serial.print(testDuration);
+    Serial.println("ms");
+    
+    if (testCode == HTTP_CODE_OK) {
+        int contentLength = httpTest.getSize();
+        Serial.print("  ✓ Server responded: ");
+        Serial.println(testCode);
+        
+        if (contentLength > 0) {
+            Serial.print("  ✓ File size: ");
+            Serial.print(contentLength / 1024.0, 2);
+            Serial.println(" KB");
+            
+            // Estimate download time (assume 20 KB/s minimum speed)
+            int estimatedTime = contentLength / (20 * 1024); // seconds
+            Serial.print("  ℹ Estimated time (@20KB/s): ");
+            Serial.print(estimatedTime);
+            Serial.println("s");
+            
+            if (contentLength > MAX_FIRMWARE_SIZE) {
+                Serial.println("  ✗ ERROR: File too large!");
+                httpTest.end();
+                delete secureClient;
+                WiFi.setSleep(true);
+                reconnectMqtt();
+                setOtaLed(CRGB::Red);
+                delay(3000);
+                setOtaLed(CRGB::Black);
+                return;
+            }
+            
+            // Warn if file is very large
+            if (contentLength > 1024 * 1024) { // > 1MB
+                Serial.println("  ⚠ WARNING: Large file (>1MB)");
+                Serial.println("    This may take 60+ seconds");
+            }
+        } else {
+            Serial.println("  ⚠ File size unknown (chunked transfer?)");
+        }
+        
+        // Check response headers
+        if (httpTest.hasHeader("Content-Type")) {
+            String contentType = httpTest.header("Content-Type");
+            Serial.print("  Content-Type: ");
+            Serial.println(contentType);
+        }
+    } else {
+        Serial.print("  ⚠ HEAD request failed: ");
+        Serial.println(testCode);
+        
+        if (testCode < 0) {
+            Serial.println("  ⚠ This may be a network issue");
+            Serial.print("    Error: ");
+            Serial.println(httpTest.errorToString(testCode));
+        }
+        
+        Serial.println("  Will attempt download anyway...");
+    }
+    httpTest.end();
+    
+    // Check system resources
+    Serial.println("\n[RESOURCES] System check:");
+    Serial.print("  Free heap: ");
+    Serial.print(ESP.getFreeHeap() / 1024);
+    Serial.println(" KB");
+    Serial.print("  WiFi RSSI: ");
+    int rssi = WiFi.RSSI();
+    Serial.print(rssi);
+    Serial.println(" dBm");
+    
+    if (rssi < -75) {
+        Serial.println("  ⚠ WARNING: Weak WiFi signal");
+    }
+    
+    setOtaLed(CRGB::Blue);
+    
+    // ========== CRITICAL FIX 4: RETRY WITH PROGRESSIVE TIMEOUT ==========
+    Serial.println("\n[FIX 4] Starting download with progressive retry...");
     t_httpUpdate_return ret = HTTP_UPDATE_FAILED;
     int retryCount = 0;
-    const int MAX_RETRIES = 3; // Increased to 3 retries
+    const int MAX_RETRIES = 3;
+    unsigned long startTime = millis();
+    
+    // Configure HTTPUpdate with longer timeouts
+    httpUpdate.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    httpUpdate.rebootOnUpdate(false);
     
     while (retryCount <= MAX_RETRIES) {
         if (retryCount > 0) {
             Serial.println("\n  ═══════════════════════════════════");
-            Serial.print("  🔄 Retry attempt ");
+            Serial.print("  🔄 RETRY ");
             Serial.print(retryCount);
             Serial.print("/");
             Serial.println(MAX_RETRIES);
             Serial.println("  ═══════════════════════════════════");
             
-            // Wait longer before retry to let network stabilize
-            Serial.println("  Waiting 5 seconds for network to stabilize...");
-            for (int i = 5; i > 0; i--) {
+            // Progressive backoff: 5s, 10s, 20s
+            int waitTime = 5000 * (1 << (retryCount - 1)); // exponential
+            Serial.print("  Waiting ");
+            Serial.print(waitTime / 1000);
+            Serial.println("s for network to stabilize...");
+            
+            for (int i = waitTime / 1000; i > 0; i--) {
                 Serial.print("  ");
                 Serial.print(i);
                 Serial.println("...");
                 delay(1000);
             }
-        }
-        
-        // Re-check WiFi before retry
-        if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("  ✗ WiFi disconnected, reconnecting...");
-            WiFi.disconnect();
-            delay(1000);
-            WiFi.reconnect();
-            unsigned long wifiStart = millis();
-            while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
-                delay(500);
-                Serial.print(".");
-            }
-            Serial.println();
+            
+            // Re-check WiFi
             if (WiFi.status() != WL_CONNECTED) {
-                Serial.println("  ✗ Failed to reconnect WiFi");
+                Serial.println("  ✗ WiFi lost, reconnecting...");
+                WiFi.disconnect();
+                delay(1000);
+                WiFi.begin(ssid, password);
+                
+                unsigned long wifiStart = millis();
+                while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+                    delay(500);     
+                    Serial.print(".");
+                }
+                Serial.println();
+                
+                if (WiFi.status() != WL_CONNECTED) {
+                    Serial.println("  ✗ WiFi reconnect failed");
+                    break;
+                }
+                Serial.println("  ✓ WiFi reconnected");
+            }
+            
+            // Recreate secure client for clean retry
+            delete secureClient;
+            secureClient = new WiFiClientSecure();
+            if (!secureClient) {
+                Serial.println("  ✗ Cannot recreate client");
                 break;
             }
-            Serial.println("  ✓ WiFi reconnected");
-            Serial.print("  New RSSI: ");
-            Serial.print(WiFi.RSSI());
-            Serial.println(" dBm");
-        } else {
-            // Check signal strength
-            int currentRssi = WiFi.RSSI();
-            Serial.print("  Current RSSI: ");
-            Serial.print(currentRssi);
-            Serial.println(" dBm");
-            if (currentRssi < -85) {
-                Serial.println("  ⚠ Very weak signal, retry may fail");
-            }
+            secureClient->setInsecure();
+            
+            // PROGRESSIVE TIMEOUT: Increase timeout with each retry
+            int currentTimeout = OTA_CHUNK_TIMEOUT + (retryCount * 15000); // +15s each retry
+            secureClient->setTimeout(currentTimeout / 1000);
+            Serial.print("  Timeout increased to: ");
+            Serial.print(currentTimeout / 1000);
+            Serial.println("s");
         }
         
-        // Recreate client for each retry to ensure clean connection
-        WiFiClient newClient;
-        newClient.setTimeout(OTA_TIMEOUT / 1000);
-        newClient.setNoDelay(true);
-        
-        Serial.print("  Attempting download (attempt ");
+        Serial.print("\n  📥 Attempt ");
         Serial.print(retryCount + 1);
         Serial.print("/");
-        Serial.print(MAX_RETRIES + 1);
-        Serial.println(")...");
+        Serial.println(MAX_RETRIES + 1);
+        Serial.println("  Starting download...");
         
         unsigned long attemptStart = millis();
-        Serial.println("  Calling httpUpdate.update()...");
-        ret = httpUpdate.update(newClient, url);
-        unsigned long attemptDuration = millis() - attemptStart;
         
-        // IMPORTANT: Get error code IMMEDIATELY after update() call
+        // PERFORM UPDATE
+        ret = httpUpdate.update(*secureClient, url);
+        
+        unsigned long attemptDuration = millis() - attemptStart;
         int errorCode = httpUpdate.getLastError();
         String errorStr = httpUpdate.getLastErrorString();
         
-        Serial.print("  Attempt duration: ");
+        Serial.print("  Duration: ");
         Serial.print(attemptDuration / 1000.0, 2);
-        Serial.println(" seconds");
-        Serial.print("  Update result: ");
-        Serial.println(ret == HTTP_UPDATE_OK ? "OK" : "FAILED");
-        Serial.print("  Error code: ");
-        Serial.println(errorCode);
-        Serial.print("  Error string: ");
-        Serial.println(errorStr);
+        Serial.println("s");
+        Serial.print("  Result: ");
+        Serial.println(ret == HTTP_UPDATE_OK ? "✓ SUCCESS" : "✗ FAILED");
         
         if (ret == HTTP_UPDATE_OK) {
-            Serial.println("  ✓ Download successful!");
-            break; // Success, exit retry loop
+            Serial.println("\n  ✓✓✓ DOWNLOAD COMPLETE ✓✓✓");
+            break;
         }
         
-        Serial.println("  ✗ Download failed");
+        Serial.print("  Error code: ");
+        Serial.println(errorCode);
+        Serial.print("  Error: ");
+        Serial.println(errorStr);
         
-        // Retry on connection lost errors (-5) and HTTP errors (-11)
-        if (errorCode == -5 || errorCode == -11) {
-            if (retryCount < MAX_RETRIES) {
-                Serial.print("  Error code ");
-                Serial.print(errorCode);
-                Serial.println(" is retryable");
-                Serial.print("  Retry count: ");
-                Serial.print(retryCount);
-                Serial.print("/");
-                Serial.println(MAX_RETRIES);
-                Serial.println("  Will retry...");
-                retryCount++;
-                // Continue to retry
-            } else {
-                Serial.println("  Max retries reached, stopping");
+        // Analyze error and decide retry strategy
+        bool shouldRetry = false;
+        
+        switch (errorCode) {
+            case 6:  // Stream read timeout
+                Serial.println("  → Stream timeout detected");
+                shouldRetry = true;
                 break;
-            }
+            case -5: // Connection lost (same as HTTPC_ERROR_CONNECTION_LOST)
+                Serial.println("  → Connection lost");
+                shouldRetry = true;
+                break;
+            case -11: // HTTP error
+                Serial.println("  → HTTP protocol error");
+                shouldRetry = true;
+                break;
+            case -1: // HTTPC_ERROR_CONNECTION_REFUSED
+                Serial.println("  → Connection refused");
+                shouldRetry = true;
+                break;
+            default:
+                Serial.println("  → Non-retryable error");
+                break;
+        }
+        
+        if (shouldRetry && retryCount < MAX_RETRIES) {
+            Serial.println("  ℹ Error is retryable");
+            retryCount++;
+            continue;
         } else {
-            // Don't retry for other errors
-            Serial.print("  Error code ");
-            Serial.print(errorCode);
-            Serial.println(" is not retryable, stopping");
+            Serial.println("  ✗ Stopping (max retries or fatal error)");
             break;
         }
     }
     
-    unsigned long duration = millis() - startTime;
-    Serial.print("  Duration: ");
-    Serial.print(duration / 1000.0, 2);
-    Serial.println(" seconds");
+    unsigned long totalDuration = millis() - startTime;
     
-    String response;
+    // Cleanup
+    delete secureClient;
+    WiFi.setSleep(true);
     
-    switch (ret) {
-        case HTTP_UPDATE_FAILED:
-            {
-                String error = httpUpdate.getLastErrorString();
-                int errorCode = httpUpdate.getLastError();
-                
-                Serial.println("  ✗ OTA FAILED");
-                Serial.print("    Error: ");
-                Serial.println(error);
-                Serial.print("    Code: ");
-                Serial.println(errorCode);
-                
-                // Provide more detailed error messages with suggestions
-                String errorMsg = error;
-                if (errorCode == -5) {
-                    errorMsg = "Connection lost - Check WiFi signal and file size";
-                } else if (errorCode == -11) {
-                    errorMsg = "HTTP error - Server unreachable or SSL/TLS issue";
-                    Serial.println("    💡 Suggestions for error -11:");
-                    Serial.println("      1. Check if Dropbox link is still valid");
-                    Serial.println("      2. Try regenerating the direct download link");
-                    Serial.println("      3. Check if URL is too long (>200 chars)");
-                    Serial.println("      4. Verify SSL certificate is valid");
-                } else if (errorCode == -100) {
-                    errorMsg = "HTTP error - Invalid response";
-                }
-                
-                Serial.print("    Details: ");
-                Serial.println(errorMsg);
-                
-                // Check WiFi status
-                if (WiFi.status() != WL_CONNECTED) {
-                    Serial.println("    WiFi disconnected during OTA!");
-                    errorMsg += " (WiFi disconnected)";
-                }
-                
-                response = "{\"status\":\"failed\",\"error\":\"" + errorMsg + 
-                          "\",\"code\":" + String(errorCode) + 
-                          ",\"duration\":" + String(duration) + 
-                          ",\"rssi\":" + String(WiFi.RSSI()) + "}";
-                
-                setOtaLed(CRGB::Red);
-                mqttClient.publish(topic_ota, response.c_str());
-                delay(3000);
-                setOtaLed(CRGB::Black);
-            }
-            break;
-            
-        case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("  ℹ No updates available");
-            response = "{\"status\":\"no_updates\"}";
-            
-            setOtaLed(CRGB::Yellow);
-            mqttClient.publish(topic_ota, response.c_str());
-            delay(2000);
-            setOtaLed(CRGB::Black);
-            break;
-            
-        case HTTP_UPDATE_OK:
-            Serial.println("  ✓ OTA SUCCESS!");
-            response = "{\"status\":\"success\",\"duration\":" + String(duration) + 
-                      ",\"fw_old\":\"" + firmwareVersion + "\"}";
-            
-            setOtaLed(CRGB::Green);
-            mqttClient.publish(topic_ota, response.c_str());
-            
-            // Cleanup before reboot
-            if (mqttClient.connected()) {
-                mqttClient.disconnect();
-            }
+    // Handle result
+    if (ret == HTTP_UPDATE_OK) {
+        Serial.println("\n╔═══════════════════════════════════════╗");
+        Serial.println("║   ✓✓✓ OTA SUCCESS ✓✓✓                 ║");
+        Serial.println("╚═══════════════════════════════════════╝");
+        Serial.print("  Total time: ");
+        Serial.print(totalDuration / 1000.0, 2);
+        Serial.println("s");
+        Serial.print("  Retries used: ");
+        Serial.println(retryCount);
+        
+        setOtaLed(CRGB::Green);
+        
+        reconnectMqtt();
+        delay(500);
+        if (mqttClient.connected()) {
+            String msg = "{\"status\":\"success\",\"duration\":" + String(totalDuration) + 
+                        ",\"retries\":" + String(retryCount) + "}";
+            mqttClient.publish(topic_ota, msg.c_str());
             delay(1000);
-            
-            Serial.println("  Rebooting in 2 seconds...");
-            delay(2000);
-            ESP.restart();
-            return;
+            mqttClient.disconnect();
+        }
+        
+        Serial.println("\n  🔄 REBOOTING IN 3 SECONDS...");
+        delay(3000);
+        ESP.restart();
+        
+    } else {
+        Serial.println("\n╔═══════════════════════════════════════╗");
+        Serial.println("║   ✗✗✗ OTA FAILED ✗✗✗                  ║");
+        Serial.println("╚═══════════════════════════════════════╝");
+        
+        String error = httpUpdate.getLastErrorString();
+        int errorCode = httpUpdate.getLastError();
+        
+        Serial.print("  Final error: ");
+        Serial.print(errorCode);
+        Serial.print(" - ");
+        Serial.println(error);
+        Serial.print("  Total time: ");
+        Serial.print(totalDuration / 1000.0, 2);
+        Serial.println("s");
+        Serial.print("  Retries used: ");
+        Serial.println(retryCount);
+        
+        // Detailed diagnostics
+        Serial.println("\n  DIAGNOSTICS:");
+        Serial.print("  - WiFi status: ");
+        Serial.println(WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+        Serial.print("  - Final RSSI: ");
+        Serial.print(WiFi.RSSI());
+        Serial.println(" dBm");
+        Serial.print("  - Free heap: ");
+        Serial.print(ESP.getFreeHeap() / 1024);
+        Serial.println(" KB");
+        
+        setOtaLed(CRGB::Red);
+        
+        reconnectMqtt();
+        delay(500);
+        if (mqttClient.connected()) {
+            String msg = "{\"status\":\"failed\",\"error\":\"" + error + 
+                        "\",\"code\":" + String(errorCode) + 
+                        ",\"duration\":" + String(totalDuration) +
+                        ",\"retries\":" + String(retryCount) +
+                        ",\"rssi\":" + String(WiFi.RSSI()) + "}";
+            mqttClient.publish(topic_ota, msg.c_str());
+        }
+        
+        delay(3000);
+        setOtaLed(CRGB::Black);
     }
 }
+
+// ============================================================================
+// ADDITIONAL HELPER: Check free heap before OTA
+// ============================================================================
+void checkSystemResources() {
+    Serial.println("\n[RESOURCES] System status:");
+    Serial.print("  Free heap: ");
+    Serial.print(ESP.getFreeHeap() / 1024);
+    Serial.println(" KB");
+    Serial.print("  Largest block: ");
+    Serial.print(ESP.getMaxAllocHeap() / 1024);
+    Serial.println(" KB");
+    Serial.print("  WiFi RSSI: ");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+}
+
+// Call this before OTA:
+// checkSystemResources();
 
 void setOtaLed(CRGB color) {
     leds[0] = color;
@@ -1385,6 +1646,23 @@ void loadThresholds() {
     thresholdLow = preferences.getInt("thresholdLow", DEFAULT_THRESHOLD_LOW);
     thresholdHigh = preferences.getInt("thresholdHigh", DEFAULT_THRESHOLD_HIGH);
     preferences.end();
+    
+    // Validate loaded thresholds - fix if invalid
+    bool needsFix = false;
+    if (thresholdLow <= 0 || thresholdLow < 2) {
+        thresholdLow = max(2, DEFAULT_THRESHOLD_LOW);
+        needsFix = true;
+        Serial.println("  ⚠ WARNING: Loaded thresholdLow was invalid, using safe value");
+    }
+    int minSeparation = max(5, (int)(thresholdLow * 0.3));
+    if (thresholdHigh <= thresholdLow + minSeparation) {
+        thresholdHigh = thresholdLow + minSeparation;
+        needsFix = true;
+        Serial.println("  ⚠ WARNING: Loaded thresholdHigh was too close, adjusted");
+    }
+    if (needsFix) {
+        saveThresholds(); // Save corrected values
+    }
     
     Serial.println("[NVS] Loaded thresholds:");
     Serial.print("  LOW  = ");
