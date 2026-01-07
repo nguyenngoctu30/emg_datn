@@ -8,6 +8,7 @@
   <!-- Tailwind CDN for quick styling -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="shared.css">
 
   <style>
     body { 
@@ -42,7 +43,11 @@
     @media (min-width: 768px) { main { padding-top: 4.5rem; } }
   </style>
 </head>
-<body class="min-h-screen">
+<body class="preloading min-h-screen">
+  <div id="preloader">
+    <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
+    <div id="preloader-text">Đang tải ...</div>
+  </div>
 
   <nav class="fixed top-0 left-0 right-0 bg-white border-b z-50 shadow-sm">
     <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -56,7 +61,8 @@
         <li><a href="index.html" class="hover:text-blue-600">Trang chủ</a></li>
         <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
         <li><a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a></li>
-        <li><a href="tintuc.html" class="text-blue-600 font-semibold">Tin tức</a></li>
+        <li><a href="tintuc.html" class="active">Tin tức</a></li>
+        <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
       </ul>
 
       <button id="menu-toggle" class="md:hidden p-2 rounded hover:bg-gray-100">
@@ -71,8 +77,7 @@
         <a href="index.html" class="p-2 rounded hover:bg-gray-100">Trang chủ</a>
         <a href="gioithieu.html" class="p-2 rounded hover:bg-gray-100">Giới thiệu</a>
         <a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a>
-        <a href="tintuc.html" class="p-2 rounded bg-gray-100">Tin tức</a>
-      </div>
+        <a href="tintuc.html" class="p-2 rounded bg-gray-100">Tin tức</a>        <a href="control.html" class="p-2 rounded hover:bg-gray-100">Điều khiển</a>      </div>
     </div>
   </nav>
 
@@ -175,5 +180,6 @@
 
     cards.forEach(card => observer.observe(card));
   </script>
+  <script src="common.js"></script>
 </body>
 </html>

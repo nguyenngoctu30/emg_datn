@@ -8,13 +8,18 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="ota.css">
+    <link rel="stylesheet" href="shared.css">
     <div class="flex items-center gap-3">
         <img src="logo.png" 
              alt="logo" class="w-10 h-10 rounded-full border" />
         <div class="text-lg font-semibold text-gray-700">ỨNG DỤNG CẢM BIẾN EMG VÀO ĐIỀU KHIỂN CÁNH TAY MÁY TỪ XA</div>
       </div>
 </head>
-<body class="min-h-screen bg-white font-inter flex items-center justify-center p-4">
+<body class="preloading min-h-screen bg-white font-inter flex items-center justify-center p-4">
+  <div id="preloader">
+    <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
+    <div id="preloader-text">Đang tải ...</div>
+  </div>
     <div id="ota-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center transition-opacity duration-300">
         <div class="bg-white p-6 rounded-xl shadow-2xl max-w-lg w-full text-gray-900">
             <h2 class="text-xl font-bold mb-4">EMG OTA Server</h2>
@@ -65,6 +70,7 @@
         </div>
     </div>
     <script src="ota.js"></script>
+    <script src="common.js"></script>
     <footer class="mt-10 mb-4 text-center text-gray-500 text-sm">
         © 2025 Nhóm Sinh viên Nguyễn Ngọc Tú & Vũ Bạch Long – Trường Đại học Công nghiệp thành phố Hồ Chí Minh
       </footer>

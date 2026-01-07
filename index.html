@@ -31,9 +31,35 @@
         height: 400px;
       }
     }
+
+    /* Preloader overlay */
+    #preloader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: #ffffff;
+      z-index: 9999;
+      transition: opacity 0.6s ease;
+    }
+    #preloader img {
+      width: 120px;
+      height: auto;
+    }
+    #preloader.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+    /* Keep the rest of the page hidden while preloading */
+    body.preloading > :not(#preloader) {
+      display: none;
+    }
+
   </style>
 </head>
-<body class="min-h-screen bg-gray-50 font-sans flex flex-col items-center p-4 md:p-8 text-gray-800">
+<body class="preloading min-h-screen bg-gray-50 font-sans flex flex-col items-center p-4 md:p-8 text-gray-800">
   <!-- Preloader -->
   <div id="preloader">
     <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
@@ -54,6 +80,7 @@
         <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
         <li><a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a></li>
         <li><a href="tintuc.html" class="hover:text-blue-600">Tin tức</a></li>
+        <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
       </ul>
     </div>
     <div id="mobile-menu" class="hidden sm:hidden bg-white border-t border-gray-200">
@@ -61,8 +88,7 @@
         <li><a href="index.html" class="block px-4 py-2 text-blue-600 bg-gray-100 rounded">Trang chủ</a></li>
         <li><a href="gioithieu.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Giới thiệu</a></li>
         <li><a href="progress.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Quá trình thực hiện</a></li>
-        <li><a href="tintuc.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Tin tức</a></li>
-      </ul>
+        <li><a href="tintuc.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Tin tức</a></li>        <li><a href="control.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Điều khiển</a></li>      </ul>
     </div>
   </nav>
 
@@ -123,19 +149,20 @@
         <button id="train-button" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">Bắt đầu huấn luyện</button>
         <button id="reset-button" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">Đặt lại ngưỡng</button>
         <button id="test-ema" class="px-4 py-2 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400 transition">Test EMA</button>
+        <a id="control-shortcut" href="control.html" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">Điều khiển tay</a>
         <a id="firmware-button" href="ota.html" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">Cập nhật phần mềm</a>
       </div>
 
-      <div class="mt-6">
-        <div class="flex justify-between items-center mb-2">
-          <h2 class="text-xl md:text-2xl font-semibold text-gray-900">Biểu đồ trạng thái tay</h2>
-          <div class="flex space-x-2">
-            <button id="zoom-in-hand" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm">Phóng to 🔎</button>
-            <button id="zoom-out-hand" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm">Thu nhỏ 🔍</button>
+        <div class="mt-6">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="text-xl md:text-2xl font-semibold text-gray-900">Biểu đồ trạng thái tay</h2>
+            <div class="flex space-x-2">
+              <button id="zoom-in-hand" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm">Phóng to 🔎</button>
+              <button id="zoom-out-hand" class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm">Thu nhỏ 🔍</button>
+            </div>
           </div>
+          <canvas id="hand-chart" class="w-full max-h-[250px] bg-gray-50 rounded-lg shadow-sm" aria-label="Biểu đồ lịch sử trạng thái cử chỉ tay"></canvas>
         </div>
-        <canvas id="hand-chart" class="w-full max-h-[250px] bg-gray-50 rounded-lg shadow-sm" aria-label="Biểu đồ lịch sử trạng thái cử chỉ tay"></canvas>
-      </div>
     </section>
 
     <section class="border-t pt-6 border-gray-200">
@@ -243,9 +270,15 @@
   <script>
     window.addEventListener('load', function () {
       const preloader = document.getElementById('preloader');
+      // Small delay so the preloader is visible even on very fast loads
       setTimeout(() => {
-        preloader.classList.add('hidden');
-      }, 1500); 
+        preloader.classList.add('fade-out');
+        // Wait for fade-out transition before removing and showing content
+        setTimeout(() => {
+          preloader.style.display = 'none';
+          document.body.classList.remove('preloading');
+        }, 600);
+      }, 300);
     });
 
     document.getElementById('menu-toggle').addEventListener('click', function () {

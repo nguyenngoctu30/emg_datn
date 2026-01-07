@@ -7,6 +7,7 @@
   
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="shared.css">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"> 
   <div class="flex items-center gap-3">
         <img src="logo.png" 
@@ -78,7 +79,11 @@
     main { margin-left: 260px; padding-top: 5rem; }
   </style>
 </head>
-<body>
+<body class="preloading">
+  <div id="preloader">
+    <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
+    <div id="preloader-text">Đang tải ...</div>
+  </div>
 
   <!-- NAVBAR -->
   <nav class="fixed top-0 left-0 right-0 bg-white border-b z-50 shadow-sm">
@@ -92,8 +97,9 @@
       <ul class="hidden sm:flex space-x-6 text-gray-700 font-medium">
         <li><a href="index.html" class="hover:text-blue-600">Trang chủ</a></li>
         <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
-        <li><a href="progress.html" class="text-blue-600 font-semibold">Quá trình thực hiện</a></li>
+        <li><a href="progress.html" class="active">Quá trình thực hiện</a></li>
         <li><a href="tintuc.html" class="hover:text-blue-600">Tin tức</a></li>
+        <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
       </ul>
     </div>
   </nav>
@@ -137,6 +143,11 @@
       <a href="#step6">6. Kiểm thử & đánh giá</a>
     </div>
   </aside>
+
+  <!-- Mobile shortcut to control page -->
+  <div class="md:hidden max-w-3xl mx-auto px-4 pb-6">
+    <a href="control.html" class="block px-4 py-3 rounded bg-green-600 text-white text-center font-semibold">Điều khiển</a>
+  </div>
 
   <main class="max-w-3xl mx-auto px-4 pb-16">
 
@@ -331,6 +342,7 @@
       });
     });
   </script>
+  <script src="common.js"></script>
 
 </body>
 </html>

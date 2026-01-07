@@ -1,0 +1,46 @@
+/* Shared site styles */
+
+/* Preloader overlay */
+#preloader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: #ffffff;
+  z-index: 9999;
+}
+#preloader img {
+  width: 120px;
+  height: auto;
+}
+#preloader.fade-out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+/* Hide page content until preloading ends */
+body.preloading > :not(#preloader) {
+  display: none;
+}
+
+/* Small utility consistent spacing for nav */
+.nav-brand { display: flex; align-items: center; gap: 0.75rem; }
+
+/* Active nav link */
+nav a.active, nav a.active:link, nav a.active:visited {
+  color: #2563eb; /* tailwind blue-600 */
+  border-bottom: 2px solid #2563eb;
+  font-weight: 600;
+}
+
+/* Ensure visible animation class exists for other pages */
+.fade-section { opacity: 0; transform: translateY(10px); transition: opacity 0.6s ease, transform 0.6s ease; }
+.fade-section.visible { opacity: 1; transform: translateY(0); }
+
+/* Make canvas full-width block and avoid unexpected inline sizing */
+canvas { display: block; width: 100% !important; }
+
+/* Chart container should allow overflow when scaling */
+.chart-wrapper { overflow: visible; }

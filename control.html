@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Control Hand — Web EMG</title>
+  <!-- Fonts & Tailwind to match site styling -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* fallback card styles (Tailwind applied where possible) */
+    body { font-family: 'Inter', Arial, sans-serif; }
+    .card { background: #fff; border-radius:8px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:16px; }
+    .modes button { padding:10px 16px; border:0; border-radius:6px; cursor:pointer; }
+    .modes button.active { background:#0078d4; color:#fff; }
+    .sliders { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .finger { display:flex; flex-direction:column; gap:6px; }
+    .footer { text-align:right; margin-top:8px; }
+    .muted { color:#666 }
+    .small { font-size:13px }
+
+    /* Preloader overlay (copied from index.html) */
+    #preloader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: #ffffff;
+      z-index: 9999;
+      transition: opacity 0.6s ease;
+    }
+    #preloader img { width: 120px; height: auto; }
+    #preloader.fade-out { opacity: 0; pointer-events: none; }
+    body.preloading > :not(#preloader) { display: none; }
+  </style>
+</head>
+<body class="preloading min-h-screen bg-gray-50 font-sans flex flex-col items-center p-4 md:p-8 text-gray-800">
+  <!-- Preloader (keeps consistent behavior with index.html) -->
+  <div id="preloader">
+    <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
+    <div id="preloader-text">Đang tải ...</div>
+  </div>
+  <nav class="w-full bg-white shadow-md fixed top-0 left-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 flex justify-between items-center h-14">
+      <button id="menu-toggle" class="sm:hidden text-gray-800 focus:outline-none">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      <span class="text-lg font-bold text-gray-800">ỨNG DỤNG CẢM BIẾN EMG VÀO ĐIỀU KHIỂN CÁNH TAY MÁY TỪ XA</span>
+      <ul class="hidden sm:flex space-x-6 text-gray-700 font-medium">
+        <li><a href="index.html" class="hover:text-blue-600">Trang chủ</a></li>
+        <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
+        <li><a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a></li>
+        <li><a href="tintuc.html" class="hover:text-blue-600">Tin tức</a></li>
+        <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
+      </ul>
+    </div>
+    <div id="mobile-menu" class="hidden sm:hidden bg-white border-t border-gray-200">
+      <ul class="flex flex-col p-2 space-y-2 text-gray-700 font-medium">
+        <li><a href="index.html" class="block px-4 py-2 text-blue-600 bg-gray-100 rounded">Trang chủ</a></li>
+        <li><a href="gioithieu.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Giới thiệu</a></li>
+        <li><a href="progress.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Quá trình thực hiện</a></li>
+        <li><a href="tintuc.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Tin tức</a></li>
+        <li><a href="control.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Điều khiển</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div style="height:56px;"></div>
+  <main class="w-full max-w-6xl bg-white rounded-3xl shadow-lg p-6 md:p-8 space-y-8">
+    <div class="card">
+    <h1>Điều khiển tay — Web</h1>
+    <p class="muted small">Kết nối đến broker: <code>broker.hivemq.com</code> (WebSocket)</p>
+    <div class="row" style="margin-top:8px;">
+      <div style="flex:1">
+        <div class="modes">
+          <button id="btnEmg">EMG</button>
+          <button id="btnManual">MANUAL</button>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div>Trạng thái MQTT: <span id="mqttStatus" class="status muted">Đang ngắt</span></div>
+        <div>Chế độ thiết bị: <span id="deviceMode" class="status muted">?</span></div>
+      </div>
+    </div>
+  </div>
+
+  
+
+  <!-- Tab contents -->
+  <section id="tab-manual" class="tab-content">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0">Manual Control</h2>
+      <p class="muted small">Chỉ hoạt động khi thiết bị ở chế độ <strong>MANUAL</strong>. Bạn có thể <strong>Send</strong> hoặc bật <em>Auto-send</em> để gửi mỗi khi thay đổi góc.</p>
+
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
+        <label><input type="checkbox" id="autoSend"> Auto-send</label>
+        <button id="btnSend">Send</button>
+        <div style="flex:1"></div>
+        <div class="muted small">Last payload: <span id="lastPayload">-</span></div>
+      </div>
+
+      <div class="sliders">
+        <div class="finger">
+          <label>Thumb: <span id="vThumb">90</span>°</label>
+          <input id="sThumb" type="range" min="0" max="180" value="180">
+        </div>
+        <div class="finger">
+          <label>Index: <span id="vIndex">90</span>°</label>
+          <input id="sIndex" type="range" min="0" max="180" value="180">
+        </div>
+        <div class="finger">
+          <label>Middle: <span id="vMiddle">90</span>°</label>
+          <input id="sMiddle" type="range" min="0" max="180" value="180">
+        </div>
+        <div class="finger">
+          <label>Ring: <span id="vRing">90</span>°</label>
+          <input id="sRing" type="range" min="0" max="180" value="0">
+        </div>
+        <div class="finger" style="grid-column:1 / -1">
+          <label>Pinky: <span id="vPinky">90</span>°</label>
+          <input id="sPinky" type="range" min="0" max="180" value="0">
+        </div>
+      </div>
+
+      <div class="footer small muted">Topics used: <code>hand/mode</code>, <code>hand/manual</code>, <code>hand/status</code></div>
+    </div>
+  </section>
+
+  <section id="tab-emg" class="tab-content" style="display:none">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0">EMG Monitor</h2>
+      <p class="muted small">Dữ liệu EMG thời gian thực và lịch sử. (Placeholder)</p>
+      <div class="muted small">Bạn có thể thêm biểu đồ hoặc controls cho EMG ở đây.</div>
+    </div>
+  </section>
+
+  <section id="tab-status" class="tab-content" style="display:none">
+    <div class="card">
+      <h2 style="margin:0 0 8px 0">Device Status</h2>
+      <p class="muted small">Thông tin trạng thái thiết bị và kết nối.</p>
+      <div class="muted small">
+        Trạng thái MQTT: <span id="mqttStatusInline">Đang ngắt</span><br>
+        Chế độ hiện tại: <span id="deviceModeInline">?</span>
+      </div>
+    </div>
+  </section>
+
+  </main>
+
+  <footer class="mt-10 mb-4 text-center text-gray-500 text-sm">
+    © 2025 Nhóm Sinh viên Nguyễn Ngọc Tú & Vũ Bạch Long – Trường Đại học Công nghiệp thành phố Hồ Chí Minh
+  </footer>
+
+  <script>
+    // Preloader: same behavior as index.html
+    window.addEventListener('load', function () {
+      const preloader = document.getElementById('preloader');
+      // Small delay so the preloader is visible even on very fast loads
+      setTimeout(() => {
+        if (preloader) preloader.classList.add('fade-out');
+        // Wait for fade-out transition before removing and showing content
+        setTimeout(() => {
+          if (preloader) preloader.style.display = 'none';
+          document.body.classList.remove('preloading');
+        }, 600);
+      }, 300);
+    });
+
+    // Mobile menu toggle
+    (function(){
+      const btn = document.getElementById('menu-toggle');
+      const menu = document.getElementById('mobile-menu');
+      if(btn && menu) btn.addEventListener('click', ()=> menu.classList.toggle('hidden'));
+
+      // Highlight active nav link
+      try{
+        const path = location.pathname.split('/').pop() || 'control.html';
+        document.querySelectorAll('nav a').forEach(a=>{
+          if(a.getAttribute('href') === path) a.classList.add('text-blue-600','border-b-2','border-blue-600');
+        });
+      } catch(e){ /* ignore */ }
+    })();
+  </script>
+  <script src="common.js"></script>
+  <script src="control.js"></script>
+</body>
+</html>

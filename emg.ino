@@ -96,7 +96,7 @@ struct TrainingState {
 // ============================================================================
 // NETWORK CONFIGURATION
 // ============================================================================
-const char* ssid = "677 5G";
+const char* ssid = "677";
 const char* password = "10101010";
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
@@ -229,11 +229,12 @@ void setupNetwork() {
     Serial.println(ssid);
     
     WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
     WiFi.begin(ssid, password);
     
     int dots = 0;
     unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
         delay(500);
         Serial.print(".");
         if (++dots % 20 == 0) Serial.println();
@@ -249,6 +250,11 @@ void setupNetwork() {
         Serial.println(" dBm");
     } else {
         Serial.println("  ✗ WiFi connection failed!");
+        uint8_t res = WiFi.waitForConnectResult();
+        Serial.print("  waitForConnectResult: ");
+        Serial.print((int)res);
+        Serial.print(" ("); Serial.print(wifiStatusToString(res)); Serial.println(")");
+        scanNetworksReport();
         Serial.println("  System will continue in offline mode");
     }
     
@@ -270,6 +276,58 @@ void setupNetwork() {
     Serial.println(deviceId);
     Serial.println("[NETWORK] Setup complete\n");
 }
+
+// Helper: scan and report nearby Wi-Fi networks (useful to debug phone hotspots)
+void scanNetworksReport() {
+    Serial.println("[WIFI] Scanning for nearby networks...");
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+        Serial.println("  No networks found (scan result 0)");
+        return;
+    }
+    Serial.print("  Found "); Serial.print(n); Serial.println(" networks:");
+    for (int i = 0; i < n; i++) {
+        String s = WiFi.SSID(i);
+        int rssi = WiFi.RSSI(i);
+        int ch = WiFi.channel(i);
+        uint8_t enc = WiFi.encryptionType(i);
+        String bssid = WiFi.BSSIDstr(i);
+        String encName;
+        switch (enc) {
+            case WIFI_AUTH_OPEN: encName = "OPEN"; break;
+            case WIFI_AUTH_WEP: encName = "WEP"; break;
+            case WIFI_AUTH_WPA_PSK: encName = "WPA_PSK"; break;
+            case WIFI_AUTH_WPA2_PSK: encName = "WPA2_PSK"; break;
+            case WIFI_AUTH_WPA_WPA2_PSK: encName = "WPA/WPA2_PSK"; break;
+            case WIFI_AUTH_WPA2_ENTERPRISE: encName = "WPA2_ENTERPRISE"; break;
+            case WIFI_AUTH_WPA3_PSK: encName = "WPA3_PSK"; break;
+            case WIFI_AUTH_WPA2_WPA3_PSK: encName = "WPA2/WPA3_PSK"; break;
+            default: encName = "UNKNOWN(" + String(enc) + ")"; break;
+        }
+
+        Serial.print("    "); Serial.print(i + 1); Serial.print(": ");
+        Serial.print(s);
+        Serial.print(" | BSSID: "); Serial.print(bssid);
+        Serial.print(" | RSSI: "); Serial.print(rssi); Serial.print(" dBm");
+        Serial.print(" | CH: "); Serial.print(ch);
+        if (ch > 14) Serial.print(" (5GHz)"); else Serial.print(" (2.4GHz)");
+        Serial.print(" | Enc: "); Serial.println(encName);
+    }
+    WiFi.scanDelete();
+}
+
+String wifiStatusToString(uint8_t s) {
+    switch (s) {
+        case WL_CONNECTED: return "WL_CONNECTED";
+        case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
+        case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+        case WL_DISCONNECTED: return "WL_DISCONNECTED";
+        case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
+        default: return "UNKNOWN";
+    }
+} 
+
 
 // ============================================================================
 // MAIN LOOP
@@ -302,16 +360,24 @@ void ensureConnectivity() {
     // WiFi reconnect
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WIFI] Reconnecting...");
+        WiFi.setAutoReconnect(true);
         WiFi.disconnect();
         WiFi.begin(ssid, password);
         
         unsigned long start = millis();
-        while (WiFi.status() != WL_CONNECTED && millis() - start < 5000) {
+        while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
             delay(200);
         }
         
         if (WiFi.status() == WL_CONNECTED) {
             Serial.println("  ✓ WiFi reconnected");
+        } else {
+            Serial.println("  ✗ WiFi reconnect failed");
+            uint8_t res = WiFi.waitForConnectResult();
+            Serial.print("  waitForConnectResult: ");
+            Serial.print((int)res);
+            Serial.print(" ("); Serial.print(wifiStatusToString(res)); Serial.println(")");
+            scanNetworksReport();
         }
     }
     
@@ -506,15 +572,17 @@ void controlServo() {
     }
     
     // Validate thresholds
-    if (thresholdLow <= 0 || thresholdLow < 2) {
+    if (thresholdLow < 2) {
         int minLow = max(2, thresholdHigh / 4);
-        thresholdLow = minLow;
-        Serial.println("  ⚠ WARNING: thresholdLow adjusted to " + String(thresholdLow));
-        saveThresholds();
+        if (thresholdLow != minLow) {
+            thresholdLow = minLow;
+            Serial.println("  ⚠ WARNING: thresholdLow adjusted to " + String(thresholdLow));
+            saveThresholds();
+        }
     }
     
     int minSeparation = max(5, (int)(thresholdLow * 0.3));
-    if (thresholdHigh <= thresholdLow + minSeparation) {
+    if (thresholdHigh < thresholdLow + minSeparation) {
         thresholdHigh = thresholdLow + minSeparation;
         Serial.println("  ⚠ WARNING: thresholdHigh adjusted to " + String(thresholdHigh));
         saveThresholds();
@@ -879,7 +947,7 @@ void computeThresholdsKMeans() {
     
     // Ensure minimum separation between thresholds (at least 30% of low threshold, minimum 5)
     int minSeparation = max(5, (int)(thresholdLow * 0.3));
-    if (thresholdHigh <= thresholdLow + minSeparation) {
+    if (thresholdHigh < thresholdLow + minSeparation) {
         thresholdHigh = thresholdLow + minSeparation;
         Serial.print("  ⚠ Applied minimum separation: +");
         Serial.println(minSeparation);
@@ -1649,13 +1717,16 @@ void loadThresholds() {
     
     // Validate loaded thresholds - fix if invalid
     bool needsFix = false;
-    if (thresholdLow <= 0 || thresholdLow < 2) {
-        thresholdLow = max(2, DEFAULT_THRESHOLD_LOW);
-        needsFix = true;
-        Serial.println("  ⚠ WARNING: Loaded thresholdLow was invalid, using safe value");
+    if (thresholdLow < 2) {
+        int safeLow = max(2, DEFAULT_THRESHOLD_LOW);
+        if (thresholdLow != safeLow) {
+            thresholdLow = safeLow;
+            needsFix = true;
+            Serial.println("  ⚠ WARNING: Loaded thresholdLow was invalid, using safe value");
+        }
     }
     int minSeparation = max(5, (int)(thresholdLow * 0.3));
-    if (thresholdHigh <= thresholdLow + minSeparation) {
+    if (thresholdHigh < thresholdLow + minSeparation) {
         thresholdHigh = thresholdLow + minSeparation;
         needsFix = true;
         Serial.println("  ⚠ WARNING: Loaded thresholdHigh was too close, adjusted");

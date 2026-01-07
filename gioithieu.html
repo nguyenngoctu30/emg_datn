@@ -14,8 +14,14 @@
     });
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="shared.css">
 </head>
-<body class="bg-gray-50 font-sans leading-relaxed text-gray-800">
+<body class="preloading bg-gray-50 font-sans leading-relaxed text-gray-800">
+  <div id="preloader">
+    <img id="preloader-logo" src="logo.png" alt="Preloader Logo" />
+    <div id="preloader-text">Đang tải ...</div>
+  </div>
   <nav class="fixed top-0 left-0 right-0 bg-white border-b z-50 shadow-sm">
     <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -26,9 +32,10 @@
 
       <ul class="hidden md:flex items-center gap-6 text-sm text-gray-700">
         <li><a href="index.html" class="hover:text-blue-600">Trang chủ</a></li>
-        <li><a href="gioithieu.html" class="text-blue-600 font-semibold">Giới thiệu</a></li>
+        <li><a href="gioithieu.html" class="active">Giới thiệu</a></li>
         <li><a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a></li>
         <li><a href="tintuc.html" class="hover:text-blue-600">Tin tức</a></li>
+        <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
       </ul>
 
       <button id="menu-toggle" class="md:hidden p-2 rounded hover:bg-gray-100">
@@ -42,6 +49,7 @@
       <a href="gioithieu.html" class="block py-2 text-blue-600 font-semibold">Giới thiệu</a>
       <a href="progress.html" class="hover:text-blue-600">Quá trình thực hiện</a>
       <a href="tintuc.html" class="block py-2 text-gray-700 hover:text-blue-600">Tin tức</a>
+      <a href="control.html" class="block py-2 text-gray-700 hover:text-blue-600">Điều khiển</a>
     </div>
   </nav>
   <section class="mt-16 relative bg-gradient-to-r from-blue-50 to-blue-100 py-16">
@@ -128,5 +136,6 @@
   <footer class="mt-10 mb-4 text-center text-gray-500 text-sm">
     © 2025 Nhóm Sinh viên Nguyễn Ngọc Tú & Vũ Bạch Long – Trường Đại học Công nghiệp thành phố Hồ Chí Minh
   </footer>
+  <script src="common.js"></script>
 </body>
 </html>

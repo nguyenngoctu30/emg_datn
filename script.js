@@ -982,6 +982,22 @@ document.addEventListener('DOMContentLoaded', () => {
         
         setInterval(() => updateEMGChart(thingspeakApiUrl), 15000);
         
+        // Reset any canvas transforms and zoom levels so the charts show at normal size
+        const handCanvas = document.getElementById('hand-chart');
+        const emgCanvas = document.getElementById('emg-chart');
+        if (handCanvas) {
+            handCanvas.style.transform = 'none';
+            handCanvas.style.transformOrigin = 'center center';
+            zoomLevels['hand-chart'] = 1;
+            if (typeof handChart !== 'undefined' && handChart.resize) handChart.resize();
+        }
+        if (emgCanvas) {
+            emgCanvas.style.transform = 'none';
+            emgCanvas.style.transformOrigin = 'center center';
+            zoomLevels['emg-chart'] = 1;
+            if (typeof emgChart !== 'undefined' && emgChart.resize) emgChart.resize();
+        }
+
         setupEventListeners();
     }
 
