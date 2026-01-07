@@ -86,20 +86,28 @@
   </div>
 
   <!-- NAVBAR -->
-  <nav class="fixed top-0 left-0 right-0 bg-white border-b z-50 shadow-sm">
-    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <img src="logo.png" 
-             alt="logo" class="w-10 h-10 rounded-full border" />
-        
-      </div>
-      <div class="text-lg font-semibold">Quá trình thực hiện</div>
+  <nav class="w-full bg-white shadow-md fixed top-0 left-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 flex justify-between items-center h-14">
+      <button id="menu-toggle" class="sm:hidden text-gray-800 focus:outline-none">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      <img src="logo.png" alt="logo" class="w-10 h-10 md:w-12 md:h-12 rounded-full border" />
       <ul class="hidden sm:flex space-x-6 text-gray-700 font-medium">
         <li><a href="index.html" class="hover:text-blue-600">Trang chủ</a></li>
         <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
         <li><a href="progress.html" class="active">Quá trình thực hiện</a></li>
         <li><a href="tintuc.html" class="hover:text-blue-600">Tin tức</a></li>
         <li><a href="control.html" class="hover:text-blue-600">Điều khiển</a></li>
+    </div>
+    <div id="mobile-menu" class="hidden sm:hidden bg-white border-t border-gray-200">
+      <ul class="flex flex-col p-2 space-y-2 text-gray-700 font-medium">
+        <li><a href="index.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Trang chủ</a></li>
+        <li><a href="gioithieu.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Giới thiệu</a></li>
+        <li><a href="progress.html" class="block px-4 py-2 bg-gray-100 rounded">Quá trình thực hiện</a></li>
+        <li><a href="tintuc.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Tin tức</a></li>
+        <li><a href="control.html" class="block px-4 py-2 hover:bg-gray-100 rounded">Điều khiển</a></li>
       </ul>
     </div>
   </nav>
@@ -307,8 +315,44 @@
 
   </main>
 
-  <footer class="mt-10 mb-4 text-center text-gray-500 text-sm">
-    © 2025 Nhóm Sinh viên Nguyễn Ngọc Tú & Vũ Bạch Long – Trường Đại học Công nghiệp thành phố Hồ Chí Minh
+  <!-- Footer -->
+  <footer class="mt-20 w-full bg-gradient-to-r from-blue-100 to-blue-200 text-gray-800 py-8">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="grid md:grid-cols-3 gap-6 mb-6">
+        <!-- About -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Về Dự Án</h3>
+          <p class="text-gray-700 text-sm leading-relaxed">
+            Ứng dụng cảm biến EMG để điều khiển cánh tay robot từ xa. Dự án tốt nghiệp nhằm hỗ trợ người khuyết tật trong sinh hoạt hàng ngày.
+          </p>
+        </div>
+        <!-- Quick Links -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Liên Kết</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="index.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Trang Chủ</a></li>
+            <li><a href="gioithieu.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Giới Thiệu</a></li>
+            <li><a href="progress.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Quá Trình Thực Hiện</a></li>
+            <li><a href="tintuc.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Tin Tức</a></li>
+            <li><a href="control.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Điều Khiển</a></li>
+          </ul>
+        </div>
+        <!-- Contact -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Liên Hệ</h3>
+          <ul class="space-y-2 text-sm text-gray-700">
+            <li><strong class="text-gray-900">Email:</strong> emg.robot@hcmiu.edu.vn</li>
+            <li><strong class="text-gray-900">Trường:</strong> ĐH Công Nghiệp TP.HCM</li>
+            <li><strong class="text-gray-900">Khoa:</strong> Công nghệ điện tử</li>
+            <li><strong class="text-gray-900">Năm:</strong> 2025</li>
+          </ul>
+        </div>
+      </div>
+      <div class="border-t border-blue-300 pt-4 flex flex-col md:flex-row justify-between items-center text-xs md:text-sm">
+        <p class="text-gray-700"><strong class="text-gray-900">Nhóm:</strong> Nguyễn Ngọc Tú &amp; Vũ Bạch Long</p>
+        <p class="text-gray-700 mt-2 md:mt-0"><strong class="text-gray-900">Hướng Dẫn:</strong> TS. Phạm Việt Thành</p>
+      </div>
+    </div>
   </footer>
 
   <script>
@@ -344,5 +388,11 @@
   </script>
   <script src="common.js"></script>
 
+  <button id="scroll-to-top" title="Lẵn đầu trang">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+    </svg>
+  </button>
+  <script src="js/scroll-to-top.js"></script>
 </body>
 </html>

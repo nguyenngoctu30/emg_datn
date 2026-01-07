@@ -74,7 +74,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
-      <span class="text-lg font-bold text-gray-800">ỨNG DỤNG CẢM BIẾN EMG VÀO ĐIỀU KHIỂN CÁNH TAY MÁY TỪ XA</span>
+      <img src="logo.png" alt="logo" class="w-10 h-10 md:w-12 md:h-12 rounded-full border" />
       <ul class="hidden sm:flex space-x-6 text-gray-700 font-medium">
         <li><a href="index.html" class="text-blue-600 border-b-2 border-blue-600">Trang chủ</a></li>
         <li><a href="gioithieu.html" class="hover:text-blue-600">Giới thiệu</a></li>
@@ -93,7 +93,7 @@
   </nav>
 
   <!-- Header -->
-  <header class="pt-20 w-full max-w-6xl mb-10 flex flex-col md:flex-row justify-between items-center px-4 md:px-8 gap-4 text-center md:text-left">
+  <header class="pt-16 w-full max-w-6xl mb-8 flex flex-col md:flex-row justify-between items-center px-4 md:px-8 gap-4 text-center md:text-left">
     <img src="logo.png" alt="Logo Đại học Công nghiệp" class="w-44 md:w-48 object-contain hover:scale-105 transition-transform duration-300" />
     <div class="flex-1">
       <h1 id="main-title" class="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
@@ -262,8 +262,43 @@
   </main>
 
   <!-- Footer -->
-  <footer class="mt-10 mb-4 text-center text-gray-500 text-sm">
-    © 2025 Nhóm Sinh viên Nguyễn Ngọc Tú & Vũ Bạch Long – Trường Đại học Công nghiệp thành phố Hồ Chí Minh
+  <footer class="mt-20 w-full bg-gradient-to-r from-blue-100 to-blue-200 text-gray-800 py-8">
+    <div class="max-w-6xl mx-auto px-4">
+      <div class="grid md:grid-cols-3 gap-6 mb-6">
+        <!-- About -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Về Dự Án</h3>
+          <p class="text-gray-700 text-sm leading-relaxed">
+            Ứng dụng cảm biến EMG để điều khiển cánh tay robot từ xa. Dự án tốt nghiệp nhằm hỗ trợ người khuyết tật trong sinh hoạt hàng ngày.
+          </p>
+        </div>
+        <!-- Quick Links -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Liên Kết</h3>
+          <ul class="space-y-2 text-sm">
+            <li><a href="index.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Trang Chủ</a></li>
+            <li><a href="gioithieu.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Giới Thiệu</a></li>
+            <li><a href="progress.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Quá Trình Thực Hiện</a></li>
+            <li><a href="tintuc.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Tin Tức</a></li>
+            <li><a href="control.html" class="text-gray-700 hover:text-blue-600 transition font-medium">Điều Khiển</a></li>
+          </ul>
+        </div>
+        <!-- Contact -->
+        <div>
+          <h3 class="text-base font-bold mb-3 text-gray-900">Liên Hệ</h3>
+          <ul class="space-y-2 text-sm text-gray-700">
+            <li><strong class="text-gray-900">Email:</strong> emg.robot@hcmiu.edu.vn</li>
+            <li><strong class="text-gray-900">Trường:</strong> ĐH Công Nghiệp TP.HCM</li>
+            <li><strong class="text-gray-900">Khoa:</strong> Công nghệ điện tử</li>
+            <li><strong class="text-gray-900">Năm:</strong> 2025</li>
+          </ul>
+        </div>
+      </div>
+      <div class="border-t border-blue-300 pt-4 flex flex-col md:flex-row justify-between items-center text-xs md:text-sm">
+        <p class="text-gray-700"><strong class="text-gray-900">Nhóm:</strong> Nguyễn Ngọc Tú &amp; Vũ Bạch Long</p>
+        <p class="text-gray-700 mt-2 md:mt-0"><strong class="text-gray-900">Hướng Dẫn:</strong> TS. Phạm Việt Thành</p>
+      </div>
+    </div>
   </footer>
 
   <!-- Scripts -->
@@ -333,5 +368,11 @@
     applyBlackMaterial('box-3d-viewer');
   </script>
   <script src="script.js"></script>
+  <button id="scroll-to-top" title="Lẵn đầu trang">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
+    </svg>
+  </button>
+  <script src="js/scroll-to-top.js"></script>
 </body>
 </html>
