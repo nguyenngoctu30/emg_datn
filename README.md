@@ -464,7 +464,7 @@ Nếu bạn gặp vấn đề:
 3. **Liên hệ với tác giả**:
    - 📧 Email: [nguyenngoctu1630@gmail.com](mailto:nguyenngoctu1630@gmail.com)
    - 🐱 GitHub: [@nguyenngoctu30](https://github.com/nguyenngoctu30)
-   - 💬 Project Repository: [GitHub EMG Project](https://github.com/nguyenngoctu30/web_emg-main)
+   - 💬 Web: [Web EMG Project](https://emgdatn.vercel.app/)
 
 ---
 
