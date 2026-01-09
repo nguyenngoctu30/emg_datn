@@ -37,19 +37,14 @@ bool isRotating = false;
 unsigned long rotationStartTime = 0;
 const int ROTATION_TIME = 500;
 
-// Debouncing for grip/release detection
 unsigned long lastStateChange = 0;
-const unsigned long MIN_STATE_CHANGE_INTERVAL = 500; // Minimum 500ms between state changes (increased for stability)
-bool lastGripState = false; // false = relaxed, true = gripped
+const unsigned long MIN_STATE_CHANGE_INTERVAL = 500; 
+bool lastGripState = false; 
 
-// Confirmation mechanism: require signal to stay above/below threshold for a duration
 unsigned long gripConfirmationStart = 0;
 unsigned long relaxConfirmationStart = 0;
-const unsigned long CONFIRMATION_DURATION = 200; // Require 200ms of consistent signal before changing state
-bool confirmedGripState = false; // The confirmed/stable state
-// ============================================================================
-// ENHANCED SIGNAL PROCESSING - EMA FILTER
-// ============================================================================
+const unsigned long CONFIRMATION_DURATION = 200; 
+bool confirmedGripState = false;
 #define EMA_ARRAY_SIZE 15
 int emaArray1[EMA_ARRAY_SIZE];
 int emaArray2[EMA_ARRAY_SIZE];
@@ -63,32 +58,24 @@ const float EMA_ALPHA = 0.35;
 
 int emg1_stable = 0;
 int emg2_stable = 0;
-// ============================================================================
-// ADAPTIVE THRESHOLDS
-// ============================================================================
+
 const int DEFAULT_THRESHOLD_HIGH = 15;
 const int DEFAULT_THRESHOLD_LOW = 10;
 int thresholdHigh = DEFAULT_THRESHOLD_HIGH;
 int thresholdLow = DEFAULT_THRESHOLD_LOW;
 Preferences preferences;
 
-// ============================================================================
-// TRAINING STATE
-// ============================================================================
 struct TrainingState {
     bool active;
     unsigned long startTime;
     unsigned long lastSample;
     std::vector<int> samples;
-    unsigned long DURATION_MS = 30000; // default 30 seconds, made writable by MQTT
+    unsigned long DURATION_MS = 30000; 
     unsigned long SAMPLE_INTERVAL_MS = 100;
     int progressPercent;
     int gestureType;
 } training;
 
-// ============================================================================
-// NETWORK CONFIGURATION
-// ============================================================================
 const char* ssid = "Bach Long";
 const char* password = "03030380";
 const char* mqtt_server = "broker.hivemq.com";
@@ -106,33 +93,25 @@ const char* topic_threshold_low = "servo/threshold_low";
 const char* topic_threshold_high = "servo/threshold_high";
 const char* topic_cmd = "servo/cmd";
 const char* topic_ema = "servo/ema";
-const int OTA_CONNECT_TIMEOUT = 15000;      // 15s để connect
-const int OTA_CHUNK_TIMEOUT = 45000;        // 45s cho mỗi chunk (tăng từ 30s)
-const int OTA_TOTAL_TIMEOUT = 300000;       // 5 phút tổng (tăng từ 3 phút)
+const int OTA_CONNECT_TIMEOUT = 15000;     
+const int OTA_CHUNK_TIMEOUT = 45000;       
+const int OTA_TOTAL_TIMEOUT = 300000;      
 
 String deviceId = "device01";
 String topic_device_ota = "";
 String topic_device_status = "";
 
-// ============================================================================
-// TIMING & VERSION
-// ============================================================================
+
 unsigned long lastMqttPublish = 0;
 const unsigned long MQTT_PUBLISH_INTERVAL = 1000;
 unsigned long lastEmaPublish = 0;                  
 const unsigned long EMA_PUBLISH_INTERVAL = 1000;
 String firmwareVersion = "v2.1.0";
 
-// ============================================================================
-// OTA CONFIGURATION
-// ============================================================================
-const int MAX_FIRMWARE_SIZE = 1572864; // 1.5MB
-const int OTA_TIMEOUT = 180000; // 180s (3 minutes) - increased for large files and weak WiFi
 
+const int MAX_FIRMWARE_SIZE = 1572864; 
+const int OTA_TIMEOUT = 180000; 
 
-// ============================================================================
-// FORWARD DECLARATIONS
-// ============================================================================
 void setupHardware();
 void setupNetwork();
 void ensureConnectivity();
@@ -148,8 +127,7 @@ void setOtaLed(CRGB color);
 void loadThresholds();
 void saveThresholds();
 void computeThresholdsKMeans();
-void scanNetworksReport(); // THÊM DÒNG NÀY
-// THÊM HÀM NÀY NGAY ĐÂY:
+void scanNetworksReport(); 
 String wifiStatusToString(wl_status_t status) {
     switch(status) {
         case WL_NO_SHIELD: return "WL_NO_SHIELD";
@@ -176,12 +154,9 @@ void setup() {
     setupHardware();
     setupNetwork();
     loadThresholds();
-    
-    // KHỞI TẠO TOPIC MQTT - THÊM DÒNG NÀY
     topic_device_ota = "device/" + deviceId + "/ota";
     topic_device_status = "device/" + deviceId + "/status";
-    
-    // Khởi tạo EMA arrays
+
     for (int i = 0; i < EMA_ARRAY_SIZE; i++) {
         emaArray1[i] = 0;
         emaArray2[i] = 0;
@@ -197,24 +172,20 @@ void setup() {
 
 void setupHardware() {
     Serial.println("[INIT] Hardware setup starting...");
-    
-    // ADC configuration for ESP32-C6
+
     analogReadResolution(12);
     analogSetAttenuation(ADC_11db);
     Serial.println("  ✓ ADC configured (12-bit, 11dB attenuation)");
-    
-    // EMG filters initialization
+
     myFilter1.init(sampleRate, humFreq, true, true, true);
     myFilter2.init(sampleRate, humFreq, true, true, true);
     Serial.println("  ✓ EMG filters initialized (50Hz notch, 1kHz sample)");
-    
-    // WS2812 LED
+
     FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
     leds[0] = CRGB::Black;
     FastLED.show();
     Serial.println("  ✓ WS2812 LED ready");
-    
-    // Training state
+
     training.active = false;
     training.progressPercent = 0;
     training.samples.reserve(500);
@@ -224,18 +195,15 @@ void setupHardware() {
 }
 void setupNetwork() {
     Serial.println("[NETWORK] Starting WiFi setup...");
-    
-    // Reset WiFi hoàn toàn
+
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
     delay(1000);
-    
-    // Khởi tạo WiFi như code mẫu
+
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
-    
-    // Scan networks
+
     Serial.println("\n[SCAN] Scanning networks...");
     int n = WiFi.scanNetworks();
     Serial.print("Found ");
@@ -263,8 +231,7 @@ void setupNetwork() {
         Serial.println("❌ Target network not found!");
         return;
     }
-    
-    // Kết nối đơn giản như code mẫu
+
     Serial.print("\n[CONNECT] Connecting to: ");
     Serial.println(ssid);
     
@@ -275,8 +242,7 @@ void setupNetwork() {
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
     WiFi.setSleep(false);
-    
-    // THỬ KẾT NỐI ĐƠN GIẢN
+
     WiFi.begin(ssid, password);
     
     int attempts = 0;
@@ -297,13 +263,11 @@ void setupNetwork() {
         Serial.println("\n❌ WiFi Connection Failed");
         Serial.print("Status: ");
         Serial.println(wifiStatusToString(WiFi.status()));
-        
-        // Thử với BSSID như code mẫu
+
         Serial.println("\n[Trying BSSID method...]");
         WiFi.disconnect(true);
         delay(2000);
-        
-        // Tìm BSSID
+
         n = WiFi.scanNetworks();
         String targetBSSID = "";
         for (int i = 0; i < n; i++) {
@@ -322,7 +286,7 @@ void setupNetwork() {
                    &bssid[0], &bssid[1], &bssid[2], 
                    &bssid[3], &bssid[4], &bssid[5]);
             
-            WiFi.begin(ssid, password, 0, bssid); // Channel 0 = auto
+            WiFi.begin(ssid, password, 0, bssid); 
             
             attempts = 0;
             while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -339,7 +303,6 @@ void setupNetwork() {
         }
     }
     
-    // Cấu hình MQTT (đơn giản hóa)
     mqttClient.setServer(mqtt_server, mqtt_port);
     mqttClient.setCallback(mqttCallback);
     mqttClient.setBufferSize(1024);
@@ -438,7 +401,7 @@ void loop() {
     handleTraining();
     publishTelemetry();
     
-    delayMicroseconds(1000); // 1kHz sampling
+    delayMicroseconds(1000); 
 }
 void ensureConnectivity() {
     static unsigned long lastWifiCheck = 0;
@@ -446,7 +409,6 @@ void ensureConnectivity() {
     static unsigned long lastMqttPublish = 0;
     unsigned long now = millis();
     
-    // Check WiFi every 10 seconds
     if (now - lastWifiCheck >= 10000) {
         lastWifiCheck = now;
         
@@ -471,7 +433,6 @@ void ensureConnectivity() {
                 Serial.print(WiFi.RSSI());
                 Serial.println(" dBm");
                 
-                // Sau khi WiFi reconnect, đợi 2s rồi reconnect MQTT
                 delay(2000);
                 if (mqttClient.connected()) {
                     mqttClient.disconnect();
@@ -481,15 +442,13 @@ void ensureConnectivity() {
             }
         }
     }
-    
-    // Check MQTT connection every 5 seconds
+
     if (now - lastMqttCheck >= 5000) {
         lastMqttCheck = now;
         
         if (!mqttClient.connected()) {
             reconnectMqtt();
         } else {
-            // Send heartbeat every 30 seconds to keep connection alive
             if (now - lastMqttPublish >= 30000) {
                 lastMqttPublish = now;
                 
@@ -505,23 +464,19 @@ void ensureConnectivity() {
             }
         }
     }
-    
-    // Process MQTT messages
+
     if (mqttClient.connected()) {
         mqttClient.loop();
     }
 }
-// ============================================================================
-// MQTT RECONNECTION - IMPROVED VERSION
-// ============================================================================
+
 void reconnectMqtt() {
     static unsigned long lastAttempt = 0;
     static int attemptCount = 0;
-    const unsigned long RECONNECT_INTERVAL = 5000; // 5 seconds
+    const unsigned long RECONNECT_INTERVAL = 5000;
     
     unsigned long now = millis();
     
-    // Kiểm tra interval
     if (now - lastAttempt < RECONNECT_INTERVAL) {
         return;
     }
@@ -535,11 +490,9 @@ void reconnectMqtt() {
     
     String clientId = "esp32_" + deviceId + "_" + String(random(0xffff), HEX);
     
-    // Chuẩn bị will message
     String willMsgStr = "{\"status\":\"disconnected\",\"device\":\"" + deviceId + "\"}";
     const char* willMessage = willMsgStr.c_str();
     
-    // Cấu hình MQTT với will message - SỬA LỖI Ở ĐÂY
     bool connected = mqttClient.connect(
         clientId.c_str(),                     // Client ID
         NULL,                                 // username
@@ -554,7 +507,6 @@ void reconnectMqtt() {
         Serial.println(" ✓");
         attemptCount = 0;
         
-        // Subscribe to topics với QoS 1
         bool sub1 = mqttClient.subscribe(topic_ota, 1);
         bool sub2 = mqttClient.subscribe(topic_train, 1);
         bool sub3 = mqttClient.subscribe(topic_cmd, 1);
@@ -569,8 +521,7 @@ void reconnectMqtt() {
         Serial.println(sub3 ? " ✓" : " ✗");
         Serial.print("    - "); Serial.print(topic_device_ota);
         Serial.println(sub4 ? " ✓" : " ✗");
-        
-        // Publish initial state với retain
+       
         mqttClient.publish(topic_threshold_low, String(thresholdLow).c_str(), true);
         mqttClient.publish(topic_threshold_high, String(thresholdHigh).c_str(), true);
         
@@ -585,8 +536,7 @@ void reconnectMqtt() {
         bool pubStatus = mqttClient.publish(topic_device_status.c_str(), status.c_str(), true);
         Serial.print("  Published status: ");
         Serial.println(pubStatus ? "✓" : "✗");
-        
-        // Gửi firmware version
+
         String emaPayload = "{\"s1\":" + String(emg1_filtered) + 
                            ",\"s2\":" + String(emg2_filtered) +
                            ",\"device\":\"" + deviceId + "\"" +
@@ -602,8 +552,7 @@ void reconnectMqtt() {
         Serial.print(" ✗ Failed (rc=");
         Serial.print(mqttClient.state());
         Serial.print(") - ");
-        
-        // Hiển thị thông báo lỗi chi tiết
+
         switch(mqttClient.state()) {
             case -4: Serial.println("Connection timeout"); break;
             case -3: Serial.println("Connection lost"); break;
@@ -616,8 +565,7 @@ void reconnectMqtt() {
             case 5: Serial.println("Unauthorized"); break;
             default: Serial.println("Unknown error"); break;
         }
-        
-        // Nếu thất bại nhiều lần, thử reset WiFi
+
         if (attemptCount >= 3) {
             Serial.println("  ⚠ Multiple MQTT failures, checking WiFi...");
             if (WiFi.status() != WL_CONNECTED) {
@@ -629,9 +577,7 @@ void reconnectMqtt() {
         }
     }
 }
-// ============================================================================
-// CALIBRATION
-// ============================================================================
+
 void handleCalibration() {
     int raw1 = analogRead(SensorInputPin1);
     int raw2 = analogRead(SensorInputPin2);
@@ -665,7 +611,6 @@ void handleCalibration() {
         Serial.println(baseline2);
         Serial.println("\nSystem ready. Starting EMG monitoring...\n");
         
-        // Publish calibration complete
         if (mqttClient.connected()) {
             String msg = "{\"status\":\"calibrated\",\"baseline1\":" + 
                         String(baseline1) + ",\"baseline2\":" + 
@@ -676,10 +621,6 @@ void handleCalibration() {
     
     delay(10);
 }
-
-// ============================================================================
-// SIGNAL PROCESSING
-// ============================================================================
 void processEMGSignals() {
     // 1. ĐỌC ADC
     int raw1 = analogRead(SensorInputPin1);
@@ -748,12 +689,10 @@ void processEMGSignals() {
     }
 }
 void controlServo() {
-    // Đảm bảo EMA đã ổn định
     if (!emaFull1 || !emaFull2) {
         return;
     }
     
-    // Validate thresholds
     if (thresholdLow < 2) {
         int minLow = max(2, thresholdHigh / 4);
         if (thresholdLow != minLow) {
@@ -770,15 +709,12 @@ void controlServo() {
         saveThresholds();
     }
     
-    // Debouncing
     unsigned long now = millis();
     bool canChangeState = (now - lastStateChange >= MIN_STATE_CHANGE_INTERVAL);
     
-    // ✅ SỬ DỤNG emg1_stable, emg2_stable (đã qua EMA)
     bool currentGripSignal = (emg1_stable > thresholdHigh || emg2_stable > thresholdHigh);
     bool currentRelaxSignal = (emg1_stable < thresholdLow && emg2_stable < thresholdLow);
     
-    // Confirmation mechanism
     if (currentGripSignal && !confirmedGripState) {
         if (gripConfirmationStart == 0) {
             gripConfirmationStart = now;
@@ -800,8 +736,7 @@ void controlServo() {
     } else if (!currentRelaxSignal) {
         relaxConfirmationStart = 0;
     }
-    
-    // Rotate to 180° if grip is confirmed
+
     if (confirmedGripState && currentAngle == 0 && !isRotating && canChangeState) {
         isRotating = true;
         rotationStartTime = millis();
@@ -819,7 +754,6 @@ void controlServo() {
             mqttClient.publish(topic_angle, "180");
         }
     }
-    // Return to 0° if relax is confirmed
     else if (!confirmedGripState && currentAngle == 180 && !isRotating && canChangeState) {
         isRotating = true;
         rotationStartTime = millis();
@@ -838,7 +772,6 @@ void controlServo() {
         }
     }
     
-    // End rotation after timeout
     if (isRotating && (millis() - rotationStartTime >= ROTATION_TIME)) {
         isRotating = false;
     }
@@ -856,15 +789,12 @@ void handleTraining() {
         return;
     }
     
-    // Sample collection
     if (now - training.lastSample >= training.SAMPLE_INTERVAL_MS) {
         training.lastSample = now;
         
-        // ✅ Thu thập dữ liệu ĐÃ QUA EMA (emg1_stable, emg2_stable)
         training.samples.push_back(emg1_stable);
         training.samples.push_back(emg2_stable);
-        
-        // Update progress
+
         training.progressPercent = (elapsed * 100) / training.DURATION_MS;
         
         if (training.samples.size() % 10 == 0) {
@@ -891,8 +821,6 @@ void handleTraining() {
             }
         }
     }
-    
-    // Check if duration elapsed
     if (elapsed >= training.DURATION_MS) {
         training.active = false;
         
@@ -911,7 +839,6 @@ void handleTraining() {
             return;
         }
         
-        // Gửi collection_done cho web
         String response = "{\"status\":\"collection_done\",\"gesture\":" + 
                  String(training.gestureType) + 
                  ",\"samples\":" + String(training.samples.size()) + "}";
@@ -925,10 +852,6 @@ void handleTraining() {
         Serial.println("  ✓ K-Means training finished\n");
     }
 }
-
-// ============================================================================
-// ADAPTIVE K-MEANS CLUSTERING (9.5/10 ACCURACY)
-// ============================================================================
 void computeThresholdsKMeans() {
     const int n = training.samples.size();
     const int K = 2;
@@ -939,16 +862,15 @@ void computeThresholdsKMeans() {
     Serial.print("  Sample count: ");
     Serial.println(n);
     
-    // Allocate memory
+    
     double* data = new double[n];
     int* labels = new int[n];
     
-    // Convert to double array
     for (int i = 0; i < n; i++) {
         data[i] = (double)training.samples[i];
     }
     
-    // ========== OUTLIER REMOVAL (3-SIGMA RULE) ==========
+    
     double sum = 0;
     for (int i = 0; i < n; i++) sum += data[i];
     double mean = sum / n;
@@ -965,7 +887,6 @@ void computeThresholdsKMeans() {
     Serial.print(" | StdDev: ");
     Serial.println(stddev, 2);
     
-    // Filter outliers
     int n_filtered = 0;
     for (int i = 0; i < n; i++) {
         if (stddev == 0 || fabs(data[i] - mean) <= 3.0 * stddev) {
@@ -979,8 +900,7 @@ void computeThresholdsKMeans() {
     Serial.print(" (");
     Serial.print((outliers * 100.0) / n, 1);
     Serial.println("%)");
-    
-    // Safety check
+
     if (n_filtered < n / 2) {
         Serial.println("  ⚠ Too many outliers, using original data");
         n_filtered = n;
@@ -989,7 +909,6 @@ void computeThresholdsKMeans() {
         }
     }
     
-    // ========== K-MEANS WITH MULTIPLE INITIALIZATIONS ==========
     double bestCentroids[K];
     double bestInertia = 1e308;
     
@@ -998,12 +917,10 @@ void computeThresholdsKMeans() {
     for (int init = 0; init < N_INIT; init++) {
         double centroids[K];
         
-        // K-Means++ initialization
         if (init == 0) {
-            // First centroid: random
             centroids[0] = data[rand() % n_filtered];
             
-            // Second centroid: farthest from first
+            
             double maxDist = -1;
             for (int i = 0; i < n_filtered; i++) {
                 double dist = fabs(data[i] - centroids[0]);
@@ -1013,26 +930,24 @@ void computeThresholdsKMeans() {
                 }
             }
         } else {
-            // Random initialization
+   
             centroids[0] = data[rand() % n_filtered];
             centroids[1] = data[rand() % n_filtered];
         }
         
-        // Lloyd's algorithm
+ 
         bool converged = false;
         int iterations = 0;
         
         for (int iter = 0; iter < MAX_ITER && !converged; iter++) {
             iterations = iter + 1;
             
-            // Assignment step
             for (int i = 0; i < n_filtered; i++) {
                 double dist0 = fabs(data[i] - centroids[0]);
                 double dist1 = fabs(data[i] - centroids[1]);
                 labels[i] = (dist0 <= dist1) ? 0 : 1;
             }
-            
-            // Update step
+
             converged = true;
             for (int k = 0; k < K; k++) {
                 double sum_k = 0;
@@ -1055,14 +970,14 @@ void computeThresholdsKMeans() {
             }
         }
         
-        // Compute inertia
+    
         double inertia = 0;
         for (int i = 0; i < n_filtered; i++) {
             double diff = data[i] - centroids[labels[i]];
             inertia += diff * diff;
         }
         
-        // Keep best result
+ 
         if (inertia < bestInertia) {
             bestInertia = inertia;
             bestCentroids[0] = centroids[0];
@@ -1077,14 +992,12 @@ void computeThresholdsKMeans() {
         Serial.println(inertia, 2);
     }
     
-    // Sort centroids (low to high)
     if (bestCentroids[0] > bestCentroids[1]) {
         double temp = bestCentroids[0];
         bestCentroids[0] = bestCentroids[1];
         bestCentroids[1] = temp;
     }
     
-    // ========== ADAPTIVE THRESHOLD CALCULATION ==========
     double separation = bestCentroids[1] - bestCentroids[0];
     double avgCentroid = (bestCentroids[0] + bestCentroids[1]) / 2.0;
     double separationRatio = (avgCentroid > 0) ? (separation / avgCentroid) : 0;
@@ -1100,7 +1013,6 @@ void computeThresholdsKMeans() {
     Serial.print(separationRatio * 100, 1);
     Serial.println("%)");
     
-    // Adaptive high threshold based on separation quality
     double highReduction;
     if (separationRatio > 1.0) {
         highReduction = 0.75; // 25% reduction (excellent separation)
@@ -1113,21 +1025,18 @@ void computeThresholdsKMeans() {
         Serial.println("  Quality: FAIR → 10% reduction");
     }
     
-    // Calculate thresholds with validation
+   
     thresholdLow = (int)round(bestCentroids[0]);
     thresholdHigh = (int)round(bestCentroids[1] * highReduction);
-    
-    // CRITICAL: Ensure thresholdLow is NEVER 0 or too low
-    // Minimum thresholdLow must be at least 2 to properly detect relaxed state
-    // If centroid 0 is too low, use a percentage of centroid 1 instead
+
     if (thresholdLow <= 0 || thresholdLow < 2) {
-        // Use 25% of high threshold as low threshold, minimum 2
+  
         thresholdLow = max(2, (int)round(bestCentroids[1] * 0.25));
         Serial.print("  ⚠ thresholdLow was too low, adjusted to: ");
         Serial.println(thresholdLow);
     }
     
-    // Ensure minimum separation between thresholds (at least 30% of low threshold, minimum 5)
+   
     int minSeparation = max(5, (int)(thresholdLow * 0.3));
     if (thresholdHigh < thresholdLow + minSeparation) {
         thresholdHigh = thresholdLow + minSeparation;
@@ -1135,16 +1044,14 @@ void computeThresholdsKMeans() {
         Serial.println(minSeparation);
     }
     
-    // Final validation: ensure thresholds are reasonable and properly ordered
+    
     if (thresholdLow >= thresholdHigh || thresholdLow <= 0) {
-        // Fallback: use safe defaults with proper separation
-        // Ensure low is at least 2, high is at least low + 5
         thresholdLow = max(2, (int)round(bestCentroids[0]));
-        if (thresholdLow < 2) thresholdLow = 2; // Force minimum
+        if (thresholdLow < 2) thresholdLow = 2; 
         
         int calculatedHigh = thresholdLow + max(8, (int)round(separation * 0.5));
         if (calculatedHigh <= thresholdLow) {
-            calculatedHigh = thresholdLow + 8; // Force minimum separation
+            calculatedHigh = thresholdLow + 8; 
         }
         thresholdHigh = calculatedHigh;
         
@@ -1228,9 +1135,7 @@ void publishTelemetry() {
         mqttClient.publish(topic_device_status.c_str(), status.c_str());
     }
 }
-// ============================================================================
-// MQTT CALLBACK - COMMAND HANDLER
-// ============================================================================
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (length > 512) {
         Serial.println("[ERROR] Payload too large (>512 bytes)");
@@ -1936,3 +1841,4 @@ void saveThresholds() {
     Serial.print("  HIGH = ");
     Serial.println(thresholdHigh);
 }
+
