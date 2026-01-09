@@ -10,10 +10,9 @@
 #include <FastLED.h>
 #include <WiFiClientSecure.h>
 
-
 #define SensorInputPin1 0
 #define SensorInputPin2 1
-#define LED_PIN 8
+#define LED_PIN 2   
 #define NUM_LEDS 1
 CRGB leds[NUM_LEDS];
 
@@ -23,9 +22,6 @@ EMGFilters myFilter2;
 SAMPLE_FREQUENCY sampleRate = SAMPLE_FREQ_1000HZ;
 NOTCH_FREQUENCY humFreq = NOTCH_FREQ_50HZ;
 
-// ============================================================================
-// CALIBRATION STATE
-// ============================================================================
 int baseline1 = 0;
 int baseline2 = 0;
 bool baselineCalibrated = false;
@@ -34,9 +30,6 @@ int calibrationCount = 0;
 long calibrationSum1 = 0;
 long calibrationSum2 = 0;
 
-// ============================================================================
-// SIGNAL PROCESSING
-// ============================================================================
 int emg1_filtered = 0;
 int emg2_filtered = 0;
 int currentAngle = 0;
@@ -96,17 +89,14 @@ struct TrainingState {
 // ============================================================================
 // NETWORK CONFIGURATION
 // ============================================================================
-const char* ssid = "677";
-const char* password = "10101010";
+const char* ssid = "Bach Long";
+const char* password = "03030380";
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-// ============================================================================
-// MQTT TOPICS
-// ============================================================================
 const char* topic_ota = "ota";
 const char* topic_train = "train";
 const char* topic_emg1 = "emg/sensor1";
@@ -158,10 +148,21 @@ void setOtaLed(CRGB color);
 void loadThresholds();
 void saveThresholds();
 void computeThresholdsKMeans();
-
-// ============================================================================
-// SETUP
-// ============================================================================
+void scanNetworksReport(); // THÊM DÒNG NÀY
+// THÊM HÀM NÀY NGAY ĐÂY:
+String wifiStatusToString(wl_status_t status) {
+    switch(status) {
+        case WL_NO_SHIELD: return "WL_NO_SHIELD";
+        case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
+        case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
+        case WL_SCAN_COMPLETED: return "WL_SCAN_COMPLETED";
+        case WL_CONNECTED: return "WL_CONNECTED";
+        case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
+        case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+        case WL_DISCONNECTED: return "WL_DISCONNECTED";
+        default: return "UNKNOWN";
+    }
+}
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -175,6 +176,11 @@ void setup() {
     setupHardware();
     setupNetwork();
     loadThresholds();
+    
+    // KHỞI TẠO TOPIC MQTT - THÊM DÒNG NÀY
+    topic_device_ota = "device/" + deviceId + "/ota";
+    topic_device_status = "device/" + deviceId + "/status";
+    
     // Khởi tạo EMA arrays
     for (int i = 0; i < EMA_ARRAY_SIZE; i++) {
         emaArray1[i] = 0;
@@ -189,9 +195,6 @@ void setup() {
     Serial.println(">>> CALIBRATING: Keep muscles relaxed for 3 seconds...");
 }
 
-// ============================================================================
-// HARDWARE INITIALIZATION
-// ============================================================================
 void setupHardware() {
     Serial.println("[INIT] Hardware setup starting...");
     
@@ -219,122 +222,212 @@ void setupHardware() {
     
     Serial.println("[INIT] Hardware setup complete\n");
 }
-
-// ============================================================================
-// NETWORK INITIALIZATION
-// ============================================================================
 void setupNetwork() {
-    Serial.println("[NETWORK] Connecting to WiFi...");
-    Serial.print("  SSID: ");
+    Serial.println("[NETWORK] Starting WiFi setup...");
+    
+    // Reset WiFi hoàn toàn
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(1000);
+    
+    // Khởi tạo WiFi như code mẫu
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+    
+    // Scan networks
+    Serial.println("\n[SCAN] Scanning networks...");
+    int n = WiFi.scanNetworks();
+    Serial.print("Found ");
+    Serial.print(n);
+    Serial.println(" networks");
+    
+    bool found = false;
+    for (int i = 0; i < n; i++) {
+        if (WiFi.SSID(i) == ssid) {
+            found = true;
+            Serial.print("✓ Found target network: ");
+            Serial.println(ssid);
+            Serial.print("  Channel: ");
+            Serial.println(WiFi.channel(i));
+            Serial.print("  RSSI: ");
+            Serial.print(WiFi.RSSI(i));
+            Serial.println(" dBm");
+            break;
+        }
+    }
+    
+    WiFi.scanDelete();
+    
+    if (!found) {
+        Serial.println("❌ Target network not found!");
+        return;
+    }
+    
+    // Kết nối đơn giản như code mẫu
+    Serial.print("\n[CONNECT] Connecting to: ");
     Serial.println(ssid);
+    
+    WiFi.disconnect(true);
+    WiFi.persistent(false);
+    delay(1000);
     
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
+    WiFi.setSleep(false);
+    
+    // THỬ KẾT NỐI ĐƠN GIẢN
     WiFi.begin(ssid, password);
     
-    int dots = 0;
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) {
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
         delay(500);
         Serial.print(".");
-        if (++dots % 20 == 0) Serial.println();
+        attempts++;
     }
-    Serial.println();
     
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("  ✓ WiFi connected!");
-        Serial.print("  IP Address: ");
+        Serial.println("\n✅ WiFi CONNECTED!");
+        Serial.print("IP Address: ");
         Serial.println(WiFi.localIP());
-        Serial.print("  Signal: ");
+        Serial.print("RSSI: ");
         Serial.print(WiFi.RSSI());
         Serial.println(" dBm");
     } else {
-        Serial.println("  ✗ WiFi connection failed!");
-        uint8_t res = WiFi.waitForConnectResult();
-        Serial.print("  waitForConnectResult: ");
-        Serial.print((int)res);
-        Serial.print(" ("); Serial.print(wifiStatusToString(res)); Serial.println(")");
-        scanNetworksReport();
-        Serial.println("  System will continue in offline mode");
+        Serial.println("\n❌ WiFi Connection Failed");
+        Serial.print("Status: ");
+        Serial.println(wifiStatusToString(WiFi.status()));
+        
+        // Thử với BSSID như code mẫu
+        Serial.println("\n[Trying BSSID method...]");
+        WiFi.disconnect(true);
+        delay(2000);
+        
+        // Tìm BSSID
+        n = WiFi.scanNetworks();
+        String targetBSSID = "";
+        for (int i = 0; i < n; i++) {
+            if (WiFi.SSID(i) == ssid) {
+                targetBSSID = WiFi.BSSIDstr(i);
+                break;
+            }
+        }
+        
+        if (targetBSSID.length() > 0) {
+            Serial.print("Using BSSID: ");
+            Serial.println(targetBSSID);
+            
+            uint8_t bssid[6];
+            sscanf(targetBSSID.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", 
+                   &bssid[0], &bssid[1], &bssid[2], 
+                   &bssid[3], &bssid[4], &bssid[5]);
+            
+            WiFi.begin(ssid, password, 0, bssid); // Channel 0 = auto
+            
+            attempts = 0;
+            while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+                delay(500);
+                Serial.print(".");
+                attempts++;
+            }
+            
+            if (WiFi.status() == WL_CONNECTED) {
+                Serial.println("\n✅ CONNECTED with BSSID!");
+                Serial.print("IP: ");
+                Serial.println(WiFi.localIP());
+            }
+        }
     }
     
-    // MQTT setup
+    // Cấu hình MQTT (đơn giản hóa)
     mqttClient.setServer(mqtt_server, mqtt_port);
     mqttClient.setCallback(mqttCallback);
-    mqttClient.setBufferSize(512);
+    mqttClient.setBufferSize(1024);
     
-    Serial.print("  MQTT Broker: ");
-    Serial.print(mqtt_server);
-    Serial.print(":");
-    Serial.println(mqtt_port);
-    
-    // Device-specific topics
-    topic_device_ota = "devices/" + deviceId + "/ota";
-    topic_device_status = "devices/" + deviceId + "/status";
-    
-    Serial.print("  Device ID: ");
-    Serial.println(deviceId);
     Serial.println("[NETWORK] Setup complete\n");
 }
 
-// Helper: scan and report nearby Wi-Fi networks (useful to debug phone hotspots)
 void scanNetworksReport() {
     Serial.println("[WIFI] Scanning for nearby networks...");
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+    
     int n = WiFi.scanNetworks();
     if (n == 0) {
-        Serial.println("  No networks found (scan result 0)");
+        Serial.println("  No networks found");
         return;
     }
-    Serial.print("  Found "); Serial.print(n); Serial.println(" networks:");
+    
+    Serial.print("  Found ");
+    Serial.print(n);
+    Serial.println(" networks:");
+    
     for (int i = 0; i < n; i++) {
-        String s = WiFi.SSID(i);
+        String ssid = WiFi.SSID(i);
         int rssi = WiFi.RSSI(i);
-        int ch = WiFi.channel(i);
-        uint8_t enc = WiFi.encryptionType(i);
+        int channel = WiFi.channel(i);
+        wifi_auth_mode_t enc = WiFi.encryptionType(i);
         String bssid = WiFi.BSSIDstr(i);
         String encName;
+        
         switch (enc) {
             case WIFI_AUTH_OPEN: encName = "OPEN"; break;
             case WIFI_AUTH_WEP: encName = "WEP"; break;
-            case WIFI_AUTH_WPA_PSK: encName = "WPA_PSK"; break;
-            case WIFI_AUTH_WPA2_PSK: encName = "WPA2_PSK"; break;
-            case WIFI_AUTH_WPA_WPA2_PSK: encName = "WPA/WPA2_PSK"; break;
-            case WIFI_AUTH_WPA2_ENTERPRISE: encName = "WPA2_ENTERPRISE"; break;
-            case WIFI_AUTH_WPA3_PSK: encName = "WPA3_PSK"; break;
-            case WIFI_AUTH_WPA2_WPA3_PSK: encName = "WPA2/WPA3_PSK"; break;
-            default: encName = "UNKNOWN(" + String(enc) + ")"; break;
+            case WIFI_AUTH_WPA_PSK: encName = "WPA"; break;
+            case WIFI_AUTH_WPA2_PSK: encName = "WPA2"; break;
+            case WIFI_AUTH_WPA_WPA2_PSK: encName = "WPA/WPA2"; break;
+            case WIFI_AUTH_WPA3_PSK: encName = "WPA3"; break;
+            case WIFI_AUTH_WPA2_WPA3_PSK: encName = "WPA2/WPA3"; break;
+            default: encName = "UNKNOWN"; break;
         }
 
-        Serial.print("    "); Serial.print(i + 1); Serial.print(": ");
-        Serial.print(s);
-        Serial.print(" | BSSID: "); Serial.print(bssid);
-        Serial.print(" | RSSI: "); Serial.print(rssi); Serial.print(" dBm");
-        Serial.print(" | CH: "); Serial.print(ch);
-        if (ch > 14) Serial.print(" (5GHz)"); else Serial.print(" (2.4GHz)");
-        Serial.print(" | Enc: "); Serial.println(encName);
+        Serial.print("    ");
+        Serial.print(i + 1);
+        Serial.print(": ");
+        Serial.print(ssid);
+        Serial.print(" | BSSID: ");
+        Serial.print(bssid);
+        Serial.print(" | RSSI: ");
+        Serial.print(rssi);
+        Serial.print(" dBm");
+        Serial.print(" | CH: ");
+        Serial.print(channel);
+        if (channel > 14) Serial.print(" (5GHz)"); else Serial.print(" (2.4GHz)");
+        Serial.print(" | Enc: ");
+        Serial.println(encName);
+        
+        if (ssid == "Bach Long") {
+            Serial.println("      ⭐ TARGET NETWORK FOUND!");
+        }
     }
+    
     WiFi.scanDelete();
 }
 
-String wifiStatusToString(uint8_t s) {
-    switch (s) {
-        case WL_CONNECTED: return "WL_CONNECTED";
-        case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
-        case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
-        case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
-        case WL_DISCONNECTED: return "WL_DISCONNECTED";
-        case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
-        default: return "UNKNOWN";
-    }
-} 
-
-
-// ============================================================================
-// MAIN LOOP
-// ============================================================================
 void loop() {
     ensureConnectivity();
-    
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        
+        if (cmd == "scan") {
+            scanNetworksReport();
+        } else if (cmd == "reconnect") {
+            Serial.println("Manual WiFi reconnect...");
+            WiFi.disconnect();
+            delay(1000);
+            WiFi.begin(ssid, password);
+        } else if (cmd == "status") {
+            Serial.print("WiFi Status: ");
+            Serial.println(wifiStatusToString(WiFi.status()));
+            Serial.print("RSSI: ");
+            Serial.println(WiFi.RSSI());
+            Serial.print("Channel: ");
+            Serial.println(WiFi.channel());
+        }
+    }
     if (!baselineCalibrated) {
         handleCalibration();
         return;
@@ -347,106 +440,195 @@ void loop() {
     
     delayMicroseconds(1000); // 1kHz sampling
 }
-
-// ============================================================================
-// CONNECTIVITY MANAGEMENT
-// ============================================================================
 void ensureConnectivity() {
-    static unsigned long lastCheck = 0;
+    static unsigned long lastWifiCheck = 0;
+    static unsigned long lastMqttCheck = 0;
+    static unsigned long lastMqttPublish = 0;
+    unsigned long now = millis();
     
-    if (millis() - lastCheck < 5000) return;
-    lastCheck = millis();
-    
-    // WiFi reconnect
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WIFI] Reconnecting...");
-        WiFi.setAutoReconnect(true);
-        WiFi.disconnect();
-        WiFi.begin(ssid, password);
+    // Check WiFi every 10 seconds
+    if (now - lastWifiCheck >= 10000) {
+        lastWifiCheck = now;
         
-        unsigned long start = millis();
-        while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
-            delay(200);
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[WIFI] Connection lost, reconnecting...");
+            WiFi.disconnect();
+            delay(100);
+            WiFi.begin(ssid, password);
+            
+            int attempts = 0;
+            while (WiFi.status() != WL_CONNECTED && attempts < 15) {
+                delay(500);
+                Serial.print(".");
+                attempts++;
+            }
+            
+            if (WiFi.status() == WL_CONNECTED) {
+                Serial.println("\n  ✓ WiFi reconnected");
+                Serial.print("  IP: ");
+                Serial.println(WiFi.localIP());
+                Serial.print("  RSSI: ");
+                Serial.print(WiFi.RSSI());
+                Serial.println(" dBm");
+                
+                // Sau khi WiFi reconnect, đợi 2s rồi reconnect MQTT
+                delay(2000);
+                if (mqttClient.connected()) {
+                    mqttClient.disconnect();
+                }
+            } else {
+                Serial.println("\n  ✗ WiFi reconnect failed");
+            }
         }
+    }
+    
+    // Check MQTT connection every 5 seconds
+    if (now - lastMqttCheck >= 5000) {
+        lastMqttCheck = now;
         
-        if (WiFi.status() == WL_CONNECTED) {
-            Serial.println("  ✓ WiFi reconnected");
+        if (!mqttClient.connected()) {
+            reconnectMqtt();
         } else {
-            Serial.println("  ✗ WiFi reconnect failed");
-            uint8_t res = WiFi.waitForConnectResult();
-            Serial.print("  waitForConnectResult: ");
-            Serial.print((int)res);
-            Serial.print(" ("); Serial.print(wifiStatusToString(res)); Serial.println(")");
-            scanNetworksReport();
+            // Send heartbeat every 30 seconds to keep connection alive
+            if (now - lastMqttPublish >= 30000) {
+                lastMqttPublish = now;
+                
+                String heartbeat = "{\"device\":\"" + deviceId + 
+                                  "\",\"type\":\"heartbeat\"" +
+                                  ",\"uptime\":" + String(millis() / 1000) + 
+                                  ",\"heap\":" + String(ESP.getFreeHeap()) + 
+                                  ",\"rssi\":" + String(WiFi.RSSI()) + "}";
+                
+                mqttClient.publish(topic_device_status.c_str(), heartbeat.c_str());
+                
+                Serial.println("[MQTT] Heartbeat sent");
+            }
         }
     }
     
-    // MQTT reconnect
-    if (!mqttClient.connected()) {
-        reconnectMqtt();
+    // Process MQTT messages
+    if (mqttClient.connected()) {
+        mqttClient.loop();
     }
-    
-    mqttClient.loop();
 }
-
 // ============================================================================
-// MQTT RECONNECTION
+// MQTT RECONNECTION - IMPROVED VERSION
 // ============================================================================
 void reconnectMqtt() {
     static unsigned long lastAttempt = 0;
     static int attemptCount = 0;
+    const unsigned long RECONNECT_INTERVAL = 5000; // 5 seconds
     
-    if (millis() - lastAttempt < 5000) return;
-    lastAttempt = millis();
+    unsigned long now = millis();
+    
+    // Kiểm tra interval
+    if (now - lastAttempt < RECONNECT_INTERVAL) {
+        return;
+    }
+    
+    lastAttempt = now;
     attemptCount++;
     
     Serial.print("[MQTT] Connecting (attempt ");
     Serial.print(attemptCount);
     Serial.print(")...");
     
-    String clientId = "esp32_" + String(random(0xffff), HEX);
+    String clientId = "esp32_" + deviceId + "_" + String(random(0xffff), HEX);
     
-    if (mqttClient.connect(clientId.c_str())) {
+    // Chuẩn bị will message
+    String willMsgStr = "{\"status\":\"disconnected\",\"device\":\"" + deviceId + "\"}";
+    const char* willMessage = willMsgStr.c_str();
+    
+    // Cấu hình MQTT với will message - SỬA LỖI Ở ĐÂY
+    bool connected = mqttClient.connect(
+        clientId.c_str(),                     // Client ID
+        NULL,                                 // username
+        NULL,                                 // password
+        topic_device_status.c_str(),          // will topic
+        1,                                    // will QoS
+        true,                                 // will retain
+        willMessage                           // will message (phải là const char*)
+    );
+    
+    if (connected) {
         Serial.println(" ✓");
         attemptCount = 0;
         
-        // Subscribe to topics
-        mqttClient.subscribe(topic_ota);
-        mqttClient.subscribe(topic_train);
-        mqttClient.subscribe(topic_cmd);
-        mqttClient.subscribe(topic_device_ota.c_str());
+        // Subscribe to topics với QoS 1
+        bool sub1 = mqttClient.subscribe(topic_ota, 1);
+        bool sub2 = mqttClient.subscribe(topic_train, 1);
+        bool sub3 = mqttClient.subscribe(topic_cmd, 1);
+        bool sub4 = mqttClient.subscribe(topic_device_ota.c_str(), 1);
         
         Serial.println("  Subscribed to:");
-        Serial.println("    - " + String(topic_ota));
-        Serial.println("    - " + String(topic_train));
-        Serial.println("    - " + String(topic_cmd));
-        Serial.println("    - " + topic_device_ota);
+        Serial.print("    - "); Serial.print(topic_ota);
+        Serial.println(sub1 ? " ✓" : " ✗");
+        Serial.print("    - "); Serial.print(topic_train);
+        Serial.println(sub2 ? " ✓" : " ✗");
+        Serial.print("    - "); Serial.print(topic_cmd);
+        Serial.println(sub3 ? " ✓" : " ✗");
+        Serial.print("    - "); Serial.print(topic_device_ota);
+        Serial.println(sub4 ? " ✓" : " ✗");
         
-        // Publish initial state
-        mqttClient.publish(topic_threshold_low, String(thresholdLow).c_str());
-        mqttClient.publish(topic_threshold_high, String(thresholdHigh).c_str());
+        // Publish initial state với retain
+        mqttClient.publish(topic_threshold_low, String(thresholdLow).c_str(), true);
+        mqttClient.publish(topic_threshold_high, String(thresholdHigh).c_str(), true);
         
         String status = "{\"device\":\"" + deviceId + 
                        "\",\"fw\":\"" + firmwareVersion + 
                        "\",\"status\":\"connected\"" +
+                       ",\"ip\":\"" + WiFi.localIP().toString() + "\"" +
+                       ",\"rssi\":" + String(WiFi.RSSI()) +
                        ",\"thresholds\":{\"low\":" + String(thresholdLow) + 
                        ",\"high\":" + String(thresholdHigh) + "}}";
-        mqttClient.publish(topic_device_status.c_str(), status.c_str());
         
-        // ✅ Gửi firmware version ngay khi kết nối
+        bool pubStatus = mqttClient.publish(topic_device_status.c_str(), status.c_str(), true);
+        Serial.print("  Published status: ");
+        Serial.println(pubStatus ? "✓" : "✗");
+        
+        // Gửi firmware version
         String emaPayload = "{\"s1\":" + String(emg1_filtered) + 
                            ",\"s2\":" + String(emg2_filtered) +
+                           ",\"device\":\"" + deviceId + "\"" +
                            ",\"firmware\":\"" + firmwareVersion + "\"}";
-        mqttClient.publish(topic_ema, emaPayload.c_str());
         
-        Serial.println("  ✓ Published initial status + firmware version");
+        bool pubEma = mqttClient.publish(topic_ema, emaPayload.c_str());
+        Serial.print("  Published EMA data: ");
+        Serial.println(pubEma ? "✓" : "✗");
+        
+        Serial.println("  ✓ MQTT connection established successfully");
+        
     } else {
-        Serial.print(" ✗ (rc=");
+        Serial.print(" ✗ Failed (rc=");
         Serial.print(mqttClient.state());
-        Serial.println(")");
+        Serial.print(") - ");
+        
+        // Hiển thị thông báo lỗi chi tiết
+        switch(mqttClient.state()) {
+            case -4: Serial.println("Connection timeout"); break;
+            case -3: Serial.println("Connection lost"); break;
+            case -2: Serial.println("Connect failed"); break;
+            case -1: Serial.println("Disconnected"); break;
+            case 1: Serial.println("Bad protocol"); break;
+            case 2: Serial.println("Bad client ID"); break;
+            case 3: Serial.println("Unavailable"); break;
+            case 4: Serial.println("Bad credentials"); break;
+            case 5: Serial.println("Unauthorized"); break;
+            default: Serial.println("Unknown error"); break;
+        }
+        
+        // Nếu thất bại nhiều lần, thử reset WiFi
+        if (attemptCount >= 3) {
+            Serial.println("  ⚠ Multiple MQTT failures, checking WiFi...");
+            if (WiFi.status() != WL_CONNECTED) {
+                Serial.println("  WiFi disconnected, reconnecting...");
+                WiFi.disconnect();
+                delay(100);
+                WiFi.begin(ssid, password);
+            }
+        }
     }
 }
-
 // ============================================================================
 // CALIBRATION
 // ============================================================================
